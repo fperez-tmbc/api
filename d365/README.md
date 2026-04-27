@@ -58,6 +58,26 @@ done
 | Secret expires | 2028-04-25 |
 | Credentials | `~/GitHub/task-tracker/projects/d365-exchange-online-email/.env` |
 
+### D365 Companion Apps — DEV (OData)
+
+Shared SP used by all D365 Companion App Azure Functions targeting the DEV environment. Registered in D365 DEV under System Administration → Security → Azure Active Directory Applications.
+
+| Field | Value |
+|-------|-------|
+| Display name | `D365_DEV_CompanionApps` |
+| Client ID | `ea25e4c0-3bb8-40cb-9270-d4cbf713e308` |
+| Tenant | The Myers-Briggs Company - D365 (`43ca37ec`, `themyersbriggs.onmicrosoft.com`) |
+| KV secret | `D365-CLIENT-SECRET` in `kv-d365compapps-dev-us` (Elevate subscription `1110ac76`) |
+| DEV registration | Confirmed working 2026-04-27 |
+
+### D365 Companion Apps — PROD (OData)
+
+| Field | Value |
+|-------|-------|
+| Client ID | `165d9e2d-155e-467b-96ba-7f89008eb9f4` |
+| Tenant | The Myers-Briggs Company - D365 (`43ca37ec`) |
+| KV secret | TBD |
+
 **One-time D365 UI step required per environment:** Go to **System Administration → Setup → Microsoft Entra ID applications**, add the client ID and map it to a sysadmin user. Without this, the token will acquire successfully but all OData calls will return 401.
 
 ### D365 F&O Email Relay (Graph Mail.Send)
@@ -106,6 +126,7 @@ curl -s -X GET \
 
 | Environment | OData Base URL |
 |-------------|----------------|
+| DEV | `https://tmbc-devtest399b0871be35c27446aos.axcloud.dynamics.com/data/` |
 | UAT | `https://tmbc-uat.sandbox.operations.dynamics.com/data/` |
 
 ---
@@ -321,7 +342,26 @@ D365 OData returns PascalCase field names (`DataArea`, not `dataAreaId`). The fi
 When Microsoft added Exchange Online as an email provider in D365 F&O, the OAuth credentials (client ID, secret, tenant) were not surfaced as OData data entity fields. There is no programmatic way to set these via the API — UI configuration is required.
 
 ### Registering the app in D365 is required even with a valid token
-A correctly issued token (from the right tenant, right scope) will still get a `401` on all OData calls unless the app's client ID has been registered in **System Administration → Setup → Microsoft Entra ID applications** and mapped to a D365 user. This step is per-environment (UAT and prod are separate).
+A correctly issued token (from the right tenant, right scope) will still get a `401` on all OData calls unless the app's client ID has been registered in **System Administration → Setup → Microsoft Entra ID applications** and mapped to a D365 user. This step is per-environment (DEV, UAT, and prod are separate).
+
+To verify programmatically whether an SP is registered in a given environment, acquire a token and make a lightweight OData call — a `200` confirms registration, `401` means it is not registered:
+
+```bash
+SECRET=$(az keyvault secret show --vault-name <vault> --name <secret-name> --query "value" -o tsv)
+
+TOKEN=$(curl -s -X POST \
+  "https://login.microsoftonline.com/43ca37ec-5cc6-4dc3-a1ee-ad4ccede8a02/oauth2/v2.0/token" \
+  -d "grant_type=client_credentials" \
+  -d "client_id=<client-id>" \
+  -d "client_secret=$SECRET" \
+  -d "scope=<d365-base-url>/.default" \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('access_token',''))")
+
+curl -s -o /dev/null -w "%{http_code}" \
+  "<d365-base-url>/data/Companies?\$top=1" \
+  -H "Authorization: Bearer $TOKEN"
+# 200 = registered and working; 401 = not registered
+```
 
 ### `user_impersonation` scope works for client credentials
 The D365 Dynamics ERP permission (`user_impersonation`) is a delegated scope, but it works with the client credentials flow when the app is registered in D365's Entra ID applications list. D365 maps the app's token to the user account specified in the registration.
