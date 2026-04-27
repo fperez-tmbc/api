@@ -161,15 +161,26 @@ Category/subcategory values must match what's configured in the portal. Use `GET
       "closure_code": {"name": "Success"},
       "closure_comments": "Plain text summary of what was resolved.",
       "requester_ack_resolution": true
-    },
-    "resolution": {
-      "content": "<div><p>Full HTML resolution text here.</p></div>"
     }
   }
 }
 ```
 
 Use `PUT /requests/{internal_id}/close` with this as `input_data`.
+
+**The close endpoint only accepts `closure_info`.** Passing `resolution`, `category`, `subcategory`, or any other field returns `4001 EXTRA_KEY_FOUND_IN_JSON`. To set those fields when closing a ticket, make two separate calls: first `PUT /requests/{id}` to update category/subcategory/resolution, then `PUT /requests/{id}/close` with only `closure_info`.
+
+**Required before closing:** category, subcategory, and resolution must all be set. Use a single `PUT /requests/{id}` call to set all three before calling the close endpoint:
+
+```json
+{
+  "request": {
+    "category": {"name": "Infrastructure"},
+    "subcategory": {"name": "Network"},
+    "resolution": {"content": "Resolution text here."}
+  }
+}
+```
 
 #### Resolution-only update (without closing)
 
