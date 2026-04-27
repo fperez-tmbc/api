@@ -363,6 +363,32 @@ curl -s -o /dev/null -w "%{http_code}" \
 # 200 = registered and working; 401 = not registered
 ```
 
+### Enum fields require full type namespace in OData `$filter`
+
+D365 F&O custom enum fields (e.g. `CPP_IntegrationStatus`) are exposed as named OData types. Filtering with a plain integer or bare string returns `400 Bad Request`. The correct syntax requires the full `Microsoft.Dynamics.DataEntities.*` namespace prefix:
+
+```bash
+# Wrong — returns 400
+$filter=Status eq 0
+$filter=Status eq 'Unprocessed'
+
+# Correct — returns 200
+$filter=Status eq Microsoft.Dynamics.DataEntities.CPP_IntegrationStatus'Unprocessed'
+```
+
+To find the correct type name for any enum field, inspect `$metadata`:
+
+```bash
+curl -s "<base-url>/data/\$metadata" -H "Authorization: Bearer $TOKEN" \
+  | grep -A 5 'Property Name="<FieldName>"'
+# Look for: Type="Microsoft.Dynamics.DataEntities.<EnumTypeName>"
+```
+
+PATCH request bodies are not affected — string enum names work directly in JSON:
+```json
+{ "Status": "Unprocessed" }
+```
+
 ### `user_impersonation` scope works for client credentials
 The D365 Dynamics ERP permission (`user_impersonation`) is a delegated scope, but it works with the client credentials flow when the app is registered in D365's Entra ID applications list. D365 maps the app's token to the user account specified in the registration.
 
