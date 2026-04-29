@@ -112,6 +112,21 @@ GET /v1/training/campaigns
 
 ---
 
+## ADI Sync Configuration
+
+KnowBe4 syncs users from AD via the **ADI Sync** agent running on a domain controller.
+
+- **Config file:** `C:\ProgramData\KnowBe4\ADI Sync\Config\cpp-db.com.conf`
+- **LDAP server:** `SVDCDC01.cpp-db.com:636` (SSL)
+- **Base DN:** `dc=cpp-db,dc=com`
+- **Sync method:** `filter_users_by_group`
+- **Included group:** `DL Workforce` — only members of this group are synced to Kb4
+- **Excluded:** disabled accounts, HealthMailbox*, SystemMailbox*
+
+**Consultant onboarding process:** Add the user to `DL Workforce` in AD. ADI Sync will pick them up on the next sync cycle and enroll them automatically.
+
+---
+
 ## Notes
 
 - All GraphQL APIs share the same endpoint (`training.knowbe4.com/graphql`); the token scope gates access per product.
