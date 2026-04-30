@@ -9,3 +9,5 @@ Field notes, auth patterns, and scripts for APIs used at TMBC.
 | [`d365/`](d365/) | Microsoft Dynamics 365 F&O (OData) | Tenant structure, auth, entity discovery, email config, gotchas |
 | [`drata/`](drata/) | Drata | Auth, key endpoints, pagination, gotchas |
 | [`cloudflare/`](cloudflare/) | Cloudflare | DNS management, API tokens |
+| [`knowbe4/`](knowbe4/) | KnowBe4 | Security awareness training API |
+| [`logmein-rescue/`](logmein-rescue/) | LogMeIn Rescue | ASPX-based API, auth options, sessions, reporting, gotchas |
