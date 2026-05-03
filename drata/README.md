@@ -71,3 +71,4 @@
 - **`user` field structure**: name is `user.firstName` + `user.lastName`; email is `user.email` — there is no `user.name` field and identities do not carry email in this context
 - **Personnel list is heavily polluted with service accounts** — health mailboxes and other service accounts dominate the early pages; actual employees may not appear until page 2 or 3 when paginating with `limit=50`
 - **Device document upload uses `multipart/form-data`** — pass `file` as a named binary field with a filename and MIME type; passing raw bytes without a filename causes a 400
+- **Disconnecting an MDM integration does not purge synced device records** — devices from a removed integration persist in Drata indefinitely; no DELETE or archive API endpoint exists for devices; only option is to unlink from personnel and add a note, or contact Drata support
