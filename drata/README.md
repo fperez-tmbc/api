@@ -62,6 +62,19 @@
 - `GET /controls/{id}/external-evidence` — list evidence mapped to a control
 - `DELETE /external-evidence/{id}` — remove evidence from a control
 
+## Update Personnel
+
+Use the **V2 endpoint** with PUT — the V1 `/personnel/{id}` PUT returns 404 and PATCH returns a misleading 200 with an error message:
+
+```bash
+PUT https://public-api.drata.com/public/v2/personnel/{id}
+Content-Type: application/json
+
+{"employmentStatus": "CURRENT_EMPLOYEE"}
+```
+
+Valid `employmentStatus` values: `CURRENT_EMPLOYEE`, `CURRENT_CONTRACTOR`, `FORMER_EMPLOYEE`, `FORMER_CONTRACTOR`, `SERVICE_ACCOUNT`, `OUT_OF_SCOPE`
+
 ## Gotchas
 - `GET /personnel/{id}/devices` response may be a bare list `[]` or `{"data": []}` — handle both
 - `autoUpdateEnabled` can be `null` (check not run / MDM doesn't report it), not just true/false
