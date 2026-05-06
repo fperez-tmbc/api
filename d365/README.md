@@ -56,7 +56,7 @@ done
 | Tenant | The Myers-Briggs Company - D365 (`43ca37ec`) |
 | Permission | Dynamics ERP — `user_impersonation` (delegated, admin consented) |
 | Secret expires | 2028-04-25 |
-| Credentials | `~/GitHub/task-tracker/projects/d365-exchange-online-email/.env` |
+| Credentials | `~/GitHub/.tokens/d365-odata` |
 
 ### D365 Companion Apps — DEV (OData)
 
@@ -89,7 +89,7 @@ Shared SP used by all D365 Companion App Azure Functions targeting the DEV envir
 | Tenant | The Myers-Briggs Company (`d5c15341`) |
 | Permission | Microsoft Graph — `Mail.Send` (application, admin consented) |
 | Secret expires | 2028-04-25 |
-| Credentials | `~/GitHub/task-tracker/projects/d365-exchange-online-email/.env` |
+| Credentials | `~/GitHub/.tokens/d365-exo` |
 
 ---
 
@@ -128,6 +128,7 @@ curl -s -X GET \
 |-------------|----------------|
 | DEV | `https://tmbc-devtest399b0871be35c27446aos.axcloud.dynamics.com/data/` |
 | UAT | `https://tmbc-uat.sandbox.operations.dynamics.com/data/` |
+| PROD | `https://tmbc.operations.dynamics.com/data/` |
 
 ---
 
