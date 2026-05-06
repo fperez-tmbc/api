@@ -564,6 +564,12 @@ sdp_call GET "/requests" -G --data-urlencode "input_data=$payload"
 
 If your token was generated with insufficient scope, the API returns `OAUTH_SCOPE_MISMATCH` on the first call that needs a higher-privilege scope — not at token refresh time. To verify what scope a token actually has, exchange the refresh token and inspect the `scope` field in the response.
 
+### Zoho invitation emails blocked by Mimecast
+
+When re-inviting a user from Zoho Directory (`directory.zoho.com`), the invite email comes from `smailer.zohoaccounts.com`. Mimecast rejects it prior to DATA acceptance by default — the email never reaches the recipient's mailbox and no bounce is visible in SDP. Fix: add `smailer.zohoaccounts.com` to the Permitted Senders group in Mimecast admin.
+
+To diagnose: check Mimecast Message Tracking for the recipient address — status will show "Rejected" with remote server `zohoml.com`.
+
 ---
 
 ## Official Docs
