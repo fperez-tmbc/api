@@ -566,7 +566,13 @@ If your token was generated with insufficient scope, the API returns `OAUTH_SCOP
 
 ### Zoho invitation emails blocked by Mimecast
 
-When re-inviting a user from Zoho Directory (`directory.zoho.com`), the invite email comes from `smailer.zohoaccounts.com`. Mimecast rejects it prior to DATA acceptance by default — the email never reaches the recipient's mailbox and no bounce is visible in SDP. Fix: add `smailer.zohoaccounts.com` to the Permitted Senders group in Mimecast admin.
+When re-inviting a user from Zoho Directory (`directory.zoho.com`), invite emails come from Zoho's mailer infrastructure. Mimecast rejects them prior to DATA acceptance — the email never reaches the recipient's mailbox and no bounce is visible in SDP.
+
+**Root cause:** Zoho's sending IP (`135.84.80.57`) is listed on the SpamCop RBL (`spamcop.mimecast.org`), which causes Mimecast to reject at the connection level.
+
+**Fix:** add both of the following to the Permitted Senders group in Mimecast admin:
+- `smailer.zohoaccounts.com`
+- `alert.mailer-zaccounts.com`
 
 To diagnose: check Mimecast Message Tracking for the recipient address — status will show "Rejected" with remote server `zohoml.com`.
 
