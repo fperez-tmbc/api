@@ -44,4 +44,4 @@ requests.delete(f"https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_recor
 ## Gotchas
 - A Worker with no routes and no custom domains is unlinked and likely unused
 - Zone ID must be looked up by name first — it's not the domain name itself
-- TXT record `content` must include the surrounding double quotes as part of the string (e.g., `"\"value\""`) — omitting them causes Cloudflare to flag the record; Azure certificate validation includes the quotes in the DNS zone file format
+- **TXT record `content` MUST include surrounding double quotes** — always pass them explicitly in the JSON payload (e.g., `"content": "\"v=spf1 ...\""` ). Cloudflare may add them automatically if omitted, but this is not reliable and has caused malformed records in practice. This applies to SPF, DMARC, DKIM, and any other TXT record.
