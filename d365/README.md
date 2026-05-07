@@ -546,6 +546,35 @@ curl -s -G "${BASE_URL}/data/Entity" \
 
 When assigning roles via `SecurityUserRoleAssociations`, including only `SecurityRoleIdentifier` returns: `"Security role '' with identifier value '...' is not valid"`. Always include `SecurityRoleName` explicitly. The role name can be confirmed first via a `SecurityRoles` query.
 
+### EntityType name ≠ EntitySet name — always use EntitySet names in URLs
+
+The `$metadata` document contains both `EntityType` and `EntitySet` entries. The `EntityType Name` (e.g., `SecurityPrivilege`) is the schema type — **not** a valid URL segment. The `EntitySet Name` (e.g., `SecurityPrivileges`) is what goes in the URL. Using the EntityType name returns 404 with no useful error.
+
+Always grep for `EntitySet Name` when looking up endpoint names:
+
+```bash
+curl -s "<base-url>/data/\$metadata" -H "Authorization: Bearer $TOKEN" \
+  | grep 'EntitySet Name' \
+  | grep -i "<keyword>" \
+  | sed 's/.*Name="//;s/".*//'
+```
+
+### Security hierarchy entities — querying role privileges and duties
+
+The following EntitySets expose the D365 security model hierarchy:
+
+| EntitySet | Use |
+|-----------|-----|
+| `SecurityRoles` | Role catalog — AOT name + friendly name |
+| `SecurityRoleDuties` | Duties assigned to a role |
+| `SecurityDutiesV2` | Flattened role → duty → privilege view |
+| `SecurityPrivileges` | Privileges assigned to a role (direct + via duties) |
+| `SecuritySubRolesV2` | Sub-roles within a role |
+
+All support `$filter=SecurityRoleIdentifier eq '<AOT name>'`. Each record includes both an identifier (AOT name) and a name (friendly label) field.
+
+**Caveat:** `SecurityPrivileges` returns an exploded/inherited set that may differ slightly from what the D365 Security Configuration UI shows. Differences found via API should be verified in the GUI before drawing conclusions.
+
 ### `user_impersonation` scope works for client credentials
 The D365 Dynamics ERP permission (`user_impersonation`) is a delegated scope, but it works with the client credentials flow when the app is registered in D365's Entra ID applications list. D365 maps the app's token to the user account specified in the registration.
 
