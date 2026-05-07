@@ -604,7 +604,7 @@ TOKEN=$(curl -s -X POST \
   | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('access_token') or d.get('error_description','')[:200])")
 ```
 
-The password prompt script is at `~/GitHub/lcs-token.sh` — it prompts for the password without saving it to history.
+The password prompt script is at `~/GitHub/api/d365/lcs-token.sh` — it prompts for the password without saving it to history.
 
 **Token TTL:** ~1 hour. Generate a fresh token per session.
 
