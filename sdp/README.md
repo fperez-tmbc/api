@@ -584,3 +584,163 @@ To diagnose: check Mimecast Message Tracking for the recipient address — statu
 - [Requests reference](https://www.manageengine.com/products/service-desk/sdpod-v3-api/requests/request.html)
 - [Request Notes reference](https://www.manageengine.com/products/service-desk/sdpod-v3-api/requests/request_note.html)
 - [Zoho OAuth 2.0 Guide](https://www.manageengine.com/products/service-desk/sdpod-v3-api/getting-started/oauth-2.0.html)
+
+---
+
+### Contracts
+
+Scope required: `SDPOnDemand.contracts.ALL` — add to token scope string and re-exchange if missing.
+
+| Operation | Method | Endpoint |
+|-----------|--------|----------|
+| Create | POST | `/contracts` |
+| Get one | GET | `/contracts/{id}` |
+| List / search | GET | `/contracts` |
+| Update | PUT | `/contracts/{id}` |
+
+Wrapper key is `contract` (singular).
+
+#### Create contract payload structure
+
+```json
+{
+  "contract": {
+    "name": "Contract name",
+    "template": {"id": "260962000000234027"},
+    "type": {"id": "260962000000122008"},
+    "vendor": {"id": "<vendor_id>"},
+    "owner": {"id": "<technician_id>"},
+    "active_from": {"value": "<epoch_ms_UTC>"},
+    "active_till": {"value": "<epoch_ms_UTC>"},
+    "cost": {"value": 1485},
+    "is_definite": true,
+    "is_req_creation_required": true,
+    "request_creation_days": "90",
+    "is_notification_required": true,
+    "expiry_notification": {
+      "email_ids_to_notify": ["user@example.com"],
+      "notify_days": [{"notify_before": "90"}],
+      "notify_technicians": [{"id": "<technician_id>"}]
+    },
+    "comments": "Free-text notes"
+  }
+}
+```
+
+**Required fields:** `name`, `template`, `vendor`, `is_definite`. Omitting `is_definite` returns `4001` — it is not documented but required.
+
+**`is_req_creation_required` + `request_creation_days`**: Automatically creates a request ticket N days before `active_till`. Set to `true` + `"90"` for a 90-day renewal reminder. The auto-ticket fires for the contract's own expiry — if you create the contract after the N-day window has already passed, no ticket fires for that cycle.
+
+**`active_from` / `active_till`**: Pass as millisecond epoch in UTC wrapped in a `value` string. Use Python `datetime(y,m,d,tzinfo=timezone.utc)` to calculate.
+
+**Currency**: Do not pass a `currency` field on the contract — it inherits from the vendor. Passing it explicitly returns `4014`.
+
+#### Vendors
+
+| Operation | Method | Endpoint |
+|-----------|--------|----------|
+| Create | POST | `/vendors` |
+| List | GET | `/vendors` |
+
+Required fields on create: `name`, `currency` (by ID). `phone` is not a valid field (returns `4001`).
+
+| Currency | ID |
+|----------|----|
+| US Dollar | `260962000000057008` |
+| British Pound | `260962000000057011` |
+
+#### Known contract type IDs
+
+| Type | ID |
+|------|----|
+| Maintenance | `260962000000122008` |
+
+#### General Contract Template ID
+
+`260962000000234027`
+
+---
+
+### Business Rules (Dispatch Rules)
+
+| Operation | Method | Endpoint |
+|-----------|--------|----------|
+| List | GET | `/rules` |
+| Get one | GET | `/rules/{id}` |
+| Create | POST | `/rules` |
+| Delete | DELETE | `/rules/{id}` |
+
+`/business_rules`, `/automation_rules`, and `/request_rules` all return `4007 Invalid URL` — the correct endpoint is `/rules`.
+
+#### Rule object structure
+
+```json
+{
+  "name": "Rule name",
+  "module": {"id": "260962000000081038"},
+  "is_disabled": true,
+  "execute_on": 1,
+  "execute_on_first_match": false,
+  "execute_during": 1,
+  "no_condition": false,
+  "cascadeon": false,
+  "site": {"id": "260962000000222001"},
+  "criteria": [
+    {
+      "field": "subject",
+      "condition": "contains",
+      "logical_operator": "AND",
+      "values": ["Renewal"]
+    }
+  ],
+  "actions": [
+    {"is_override": false, "action": {"id": "<action_id>"}, "order": 1}
+  ]
+}
+```
+
+**`execute_on`**: `1` = on creation. **`execute_during`**: `1` = always. **`no_condition`**: set to `true` to skip criteria (match all).
+
+#### Known module IDs
+
+| Module | ID |
+|--------|----|
+| Request | `260962000000081038` |
+
+#### Known site IDs
+
+| Site | ID |
+|------|-----|
+| Base Site | `260962000000222001` |
+
+#### Actions
+
+Actions reference pre-existing action objects by ID — they are not defined inline in the rule payload. The `actions` array cannot be empty (returns `"Invalid number of entries for actions"`).
+
+```json
+"actions": [
+  {"is_override": false, "action": {"id": "<existing_action_id>"}, "order": 1}
+]
+```
+
+To create an inline action, required fields are `is_pre`, `site`, `module`, `name` — not fully explored yet.
+
+#### Known action IDs
+
+| Name | ID | Description |
+|------|----|-------------|
+| Set group Hardware Problems | `260962000000352131` | FieldUpdate — sets group field |
+
+#### Action type IDs
+
+| Type | ID |
+|------|----|
+| FieldUpdate | `260962000000081023` |
+
+#### GET response note
+
+The list endpoint (`GET /rules`) does **not** include actions in the response. Use `GET /rules/{id}` to retrieve a rule with its full action list.
+
+#### Zoho token refresh rate limiting
+
+Rapid successive API calls trigger a Zoho-level rate limit on token refreshes (`"You have made too many requests continuously"`). This blocks all further calls until the cooldown clears — typically 3–5 minutes. Batch calls where possible to avoid burning through refreshes during exploration sessions.
