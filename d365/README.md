@@ -47,16 +47,18 @@ done
 
 ## App Registrations
 
-### D365 F&O API Access (OData)
+### D365 F&O API Access (OData + LCS)
 
 | Field | Value |
 |-------|-------|
 | Display name | `D365 F&O API Access` |
 | Client ID | `c5b7d1c7-1d84-4ee1-b8c8-54fefc3c1355` |
 | Tenant | The Myers-Briggs Company - D365 (`43ca37ec`) |
-| Permission | Dynamics ERP — `user_impersonation` (delegated, admin consented) |
+| Permissions | Dynamics ERP — `user_impersonation` (delegated, admin consented); Dynamics Lifecycle Services — `user_impersonation` (delegated, admin consented) |
 | Secret expires | 2028-04-25 |
 | Credentials | `~/GitHub/.tokens/d365-odata` |
+
+The LCS `user_impersonation` permission (resource SP `913c6de4-2a4a-4a61-a9ce-945d2b2ce2e0`, scope ID `a8737248-d2c2-4a7c-9759-3dfaad5c2f19`) was added in May 2026 to allow this app to call the LCS REST API. LCS uses a **password grant** flow, not client credentials — see LCS API section below.
 
 ### D365 Companion Apps — DEV (OData)
 
@@ -124,11 +126,22 @@ curl -s -X GET \
 
 ## Base URLs
 
-| Environment | OData Base URL |
-|-------------|----------------|
-| DEV | `https://tmbc-devtest399b0871be35c27446aos.axcloud.dynamics.com/data/` |
-| UAT | `https://tmbc-uat.sandbox.operations.dynamics.com/data/` |
-| PROD | `https://tmbc.operations.dynamics.com/data/` |
+Full environment inventory retrieved from LCS API (project 1362199) on 2026-05-06.
+
+| Environment | LCS Type | OData Base URL |
+|-------------|----------|----------------|
+| TMBC | Production | `https://tmbc.operations.dynamics.com/data/` |
+| TMBC-UAT | Sandbox | `https://tmbc-uat.sandbox.operations.dynamics.com/data/` |
+| TMBC-DEVTEST39 | DevTestBuild | `https://tmbc-devtest399b0871be35c27446aos.axcloud.dynamics.com/data/` |
+| TMBC-QA | DevTestBuild | `https://tmbc-qa8d63c1875ae9cc21aos.axcloud.dynamics.com/data/` |
+| TMBC-DEV-3 | DevTestDev | `https://tmbc-dev-3f335a64232a605bedevaos.axcloud.dynamics.com/data/` |
+| TMBC-DEV2-1 | DevTestDev | `https://tmbc-dev2-12aaf1f839cdfbb79devaos.axcloud.dynamics.com/data/` |
+| TMBC-DEV39-2 | DevTestDev | `https://tmbc-dev39-2a29122b06525d8f9devaos.axcloud.dynamics.com/data/` |
+| TMBC-MergeMain-2 | DevTestDev | `https://tmbc-mergemain-2bd831be92d982723devaos.axcloud.dynamics.com/data/` |
+| TMBC-DEMO | Demo | `https://tmbc-demo885092553074bab1aos.axcloud.dynamics.com/data/` |
+| DEMO47 | Demo | `https://demo473a2298c780ca82a3aos.axcloud.dynamics.com/data/` |
+
+The token scope must match the target environment's base URL (without `/data/`). For PROD use `https://tmbc.operations.dynamics.com/.default`, for TMBC-QA use `https://tmbc-qa8d63c1875ae9cc21aos.axcloud.dynamics.com/.default`, etc.
 
 ---
 
@@ -535,6 +548,70 @@ When assigning roles via `SecurityUserRoleAssociations`, including only `Securit
 
 ### `user_impersonation` scope works for client credentials
 The D365 Dynamics ERP permission (`user_impersonation`) is a delegated scope, but it works with the client credentials flow when the app is registered in D365's Entra ID applications list. D365 maps the app's token to the user account specified in the registration.
+
+---
+
+## LCS (Lifecycle Services) API
+
+Base URL: `https://lcsapi.lcs.dynamics.com`
+
+TMBC's LCS project ID: **1362199** (visible in the LCS portal URL: `lcs.dynamics.com/V2/ProjectOverview/1362199`).
+
+### Authentication — password grant (not client credentials)
+
+LCS uses a **delegated** permission (`user_impersonation`) and requires a real user account — client credentials flow will not work. Use `grant_type=password` against the v1 token endpoint (v2 does not support password grant):
+
+```bash
+source ~/GitHub/.tokens/d365-odata   # exports CLIENT_ID, CLIENT_SECRET
+
+TOKEN=$(curl -s -X POST \
+  "https://login.microsoftonline.com/common/oauth2/token" \
+  -d "grant_type=password" \
+  -d "client_id=${CLIENT_ID}" \
+  -d "client_secret=${CLIENT_SECRET}" \
+  -d "resource=https://lcsapi.lcs.dynamics.com" \
+  -d "username=admin@themyersbriggs.onmicrosoft.com" \
+  -d "password=${PASSWORD}" \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('access_token') or d.get('error_description','')[:200])")
+```
+
+The password prompt script is at `~/GitHub/lcs-token.sh` — it prompts for the password without saving it to history.
+
+**Token TTL:** ~1 hour. Generate a fresh token per session.
+
+### List all environments in a project
+
+```bash
+curl -s "https://lcsapi.lcs.dynamics.com/environmentinfo/v1/detail/project/1362199/?page=1" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Accept: application/json"
+```
+
+Response shape:
+```json
+{
+  "ResultPageCurrent": 1,
+  "ResultHasMorePages": true,
+  "Data": [
+    {
+      "EnvironmentId": "...",
+      "EnvironmentName": "TMBC-UAT",
+      "EnvironmentType": "Sandbox",
+      "EnvironmentEndpointBaseUrl": "https://tmbc-uat.sandbox.operations.dynamics.com/",
+      "DeploymentState": "Finished",
+      "CurrentApplicationReleaseName": "10.0.47"
+    }
+  ]
+}
+```
+
+Increment `?page=N` until `ResultHasMorePages` is `false`. As of 2026-05-06 there are 10 environments across 2 pages.
+
+### Gotchas
+
+- **No project listing endpoint.** The LCS API has no endpoint to enumerate projects — the project ID must be known. Find it in the LCS portal URL when viewing the project overview.
+- **v1 token endpoint only.** The LCS resource (`https://lcsapi.lcs.dynamics.com`) does not work with the MSAL v2 endpoint (`/oauth2/v2.0/token`). Use the v1 endpoint (`/oauth2/token`) with `resource=` parameter.
+- **App must have LCS `user_impersonation`.** The `D365 F&O API Access` app registration needs the Dynamics Lifecycle Services API delegated permission (`user_impersonation`, scope ID `a8737248-d2c2-4a7c-9759-3dfaad5c2f19`) granted with admin consent, in addition to the Dynamics ERP permission for OData access. Add via: `az ad app permission add --id <client-id> --api 913c6de4-2a4a-4a61-a9ce-945d2b2ce2e0 --api-permissions a8737248-d2c2-4a7c-9759-3dfaad5c2f19=Scope` (run against D365 tenant, then grant admin consent).
 
 ---
 
