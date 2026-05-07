@@ -313,6 +313,114 @@ Accessible via **Configuration → Email history → View email history** or the
 
 ---
 
+## Security Role Management
+
+### Entity map — three different entities, three different purposes
+
+| Entity Set | Use | Writable |
+|-----------|-----|---------|
+| `SecurityRoles` | Catalog of all roles in the system | No |
+| `SecurityUserRoles` | Read current role assignments for a user | No (reads only) |
+| `SecurityUserRoleAssociations` | **Write** global (non-company-restricted) role assignments | **Yes — use this for POST** |
+| `SecurityUserRoleOrganizations` | Write company-restricted role assignments (AU/SG users only) | Yes |
+
+The D365 UI data entity "System security user role organization" maps to **`SecurityUserRoleAssociations`**.
+The D365 UI data entity "System security user role organization assignment" maps to **`SecurityUserRoleOrganizations`**.
+
+### Global role assignment (no company restriction)
+
+POST to `SecurityUserRoleAssociations`. **`SecurityRoleName` is required** in the body — the role identifier alone will return a validation error ("Security role '' with identifier value '...' is not valid").
+
+```bash
+curl -s -X POST "${BASE_URL}/data/SecurityUserRoleAssociations" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json" \
+  -d '{
+    "UserId": "jsmith",
+    "SecurityRoleIdentifier": "DOCENTRICAXVIEWER",
+    "SecurityRoleName": "Docentric AX Viewer",
+    "AssignmentMode": "Manual",
+    "AssignmentStatus": "Enabled"
+  }'
+```
+
+Fields returned on success: `UserId`, `SecurityRoleIdentifier`, `AssignmentStatus`, `AssignmentMode`, `SecurityRoleName`.
+
+### Check a user's current role assignments
+
+```bash
+curl -s -G "${BASE_URL}/data/SecurityUserRoles" \
+  --data-urlencode "\$filter=UserId eq 'jsmith'" \
+  --data-urlencode "\$select=UserId,SecurityRoleIdentifier,SecurityRoleName,AssignmentMode,AssignmentStatus" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Accept: application/json"
+```
+
+### Find role identifiers by name
+
+```bash
+curl -s -G "${BASE_URL}/data/SecurityRoles" \
+  --data-urlencode "\$select=SecurityRoleIdentifier,SecurityRoleName" \
+  --data-urlencode "\$top=500" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Accept: application/json" \
+  | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for r in data['value']:
+    if 'KEYWORD' in r.get('SecurityRoleIdentifier','').upper():
+        print(r['SecurityRoleIdentifier'], '|', r['SecurityRoleName'])
+"
+```
+
+### Docentric role identifiers (UAT/PROD confirmed 2026-05-06)
+
+| Identifier | Role Name |
+|-----------|-----------|
+| `DOCENTRICAXADMIN` | Docentric AX Administrator |
+| `DOCENTRICAXALERTADMIN` | Docentric AX Alert Administrator |
+| `DOCENTRICAXELECTRONICSIGNATUREUSER` | Docentric AX Electronic Signature User |
+| `DOCENTRICAXEMAILTEMPLATEEDITOR` | Docentric AX Email Template Editor |
+| `DOCENTRICAXLICENSEMANAGER` | Docentric AX License Manager |
+| `DOCENTRICAXPOWERUSER` | Docentric AX Power User |
+| `DOCENTRICAXPRINTARCHIVEPDFPASSWORDREADER` | Docentric AX Print Archive PDF Password Reader |
+| `DOCENTRICAXREPORTATTACHMENTSUSER` | Docentric AX Report Attachments User |
+| `DOCENTRICAXTEMPLATEEDITOR` | Docentric AX Template Editor |
+| `DOCENTRICAXUSERDEFINEDLABELSUSER` | Docentric AX Report Labels User |
+| `DOCENTRICAXVIEWER` | Docentric AX Viewer |
+
+---
+
+## User Lookup
+
+### UAT users are anonymized
+
+In UAT, `PersonName` is blank for all users and email is set to `no-reply@themyersbriggs.net`. Use the `Alias` field — it contains the real email address.
+
+```bash
+# Find user by real email (use Alias, not PersonName or Email)
+curl -s -G "${BASE_URL}/data/SystemUsers" \
+  --data-urlencode "\$filter=Alias eq 'jsmith@themyersbriggs.com'" \
+  --data-urlencode "\$select=UserId,Alias,PersonName,NetworkAlias" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Accept: application/json"
+```
+
+User IDs follow a first-initial + last-name pattern, truncated to ~8 characters (e.g., `jsmith`, `csamwort`, `swhitema`). PROD and UAT use the same user IDs.
+
+### Legal entity company codes (UAT/PROD confirmed)
+
+| Code | Notes |
+|------|-------|
+| `1000` | Appears on some roles; exact entity unclear |
+| `2100` | Primary Americas entity |
+| `2200` | SG/AU entity |
+
+AU/SG users have roles assigned to specific company codes via `SecurityUserRoleOrganizations`. All other users receive global assignments via `SecurityUserRoleAssociations` (no company restriction).
+
+---
+
 ## OData Query Patterns
 
 ```bash
@@ -389,6 +497,41 @@ PATCH request bodies are not affected — string enum names work directly in JSO
 ```json
 { "Status": "Unprocessed" }
 ```
+
+### `contains()` function is unreliable on some entities
+
+The OData `contains()` function returns `"An error has occurred"` on certain entities (confirmed on `SecurityRoles`). Use `eq` for exact matches, or fetch all records with `$select` and filter client-side in Python:
+
+```bash
+curl -s -G "${BASE_URL}/data/SecurityRoles" \
+  --data-urlencode "\$select=SecurityRoleIdentifier,SecurityRoleName" \
+  --data-urlencode "\$top=500" \
+  -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/json" \
+  | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for r in data['value']:
+    if 'KEYWORD' in r.get('SecurityRoleIdentifier','').upper(): print(r)
+"
+```
+
+### Always use `-G --data-urlencode` for OData query parameters in bash
+
+Embedding `$filter`, `$select`, etc. directly in double-quoted URLs causes silent failures — bash treats `$filter` as an empty variable, producing malformed URLs with no error. Use `-G` with `--data-urlencode` instead:
+
+```bash
+# Wrong — $filter treated as empty bash variable
+curl -s "${BASE_URL}/data/Entity?$filter=UserId eq 'x'&$select=UserId"
+
+# Correct
+curl -s -G "${BASE_URL}/data/Entity" \
+  --data-urlencode "\$filter=UserId eq 'x'" \
+  --data-urlencode "\$select=UserId"
+```
+
+### `SecurityUserRoleAssociations` requires `SecurityRoleName` in POST body
+
+When assigning roles via `SecurityUserRoleAssociations`, including only `SecurityRoleIdentifier` returns: `"Security role '' with identifier value '...' is not valid"`. Always include `SecurityRoleName` explicitly. The role name can be confirmed first via a `SecurityRoles` query.
 
 ### `user_impersonation` scope works for client credentials
 The D365 Dynamics ERP permission (`user_impersonation`) is a delegated scope, but it works with the client credentials flow when the app is registered in D365's Entra ID applications list. D365 maps the app's token to the user account specified in the registration.
