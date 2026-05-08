@@ -723,7 +723,12 @@ Actions reference pre-existing action objects by ID — they are not defined inl
 ]
 ```
 
-To create an inline action, required fields are `is_pre`, `site`, `module`, `name` — not fully explored yet.
+**Inline action creation is not supported via the API.** Exhaustive probing of the `field_update` array structure rejected every key attempted (`field`, `field_name`, `field_value`, `value`, `new_value`, `updated_value`, `category` as a direct key, nested `{"field": {"name": ...}}`, string values). `field_update` must be a non-empty array of objects (`EXTRA_VALUE_FOUND_IN_JSONARRAY` on strings; `4012` if omitted or empty), but no valid object schema was discoverable. The `field_update: []` seen on existing actions in GET responses suggests the update config is stored in a way the v3 API does not expose for writes.
+
+**To create a new action (e.g. "Set Category = Software, Subcategory = Renewals"):**
+1. Create the action in the SDP portal UI (Admin → Automation → Business Rules → add action there)
+2. Read the resulting rule back via `GET /rules/{id}` to retrieve the new action's ID
+3. Use that ID in future API rule creation via the reference pattern above
 
 #### Known action IDs
 
