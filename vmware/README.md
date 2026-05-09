@@ -13,10 +13,11 @@
 Session tokens are the only supported method. Obtain once per session; no expiry header is documented but treat as short-lived (re-auth if you get a 401).
 
 ```bash
-CREDS=$(grep -E '^(USERNAME|PASSWORD)' ~/GitHub/.tokens/svcclaude | awk -F= '{print $2}' | paste - - -d:)
+USER=$(grep '^USERNAME' ~/GitHub/.tokens/svcclaude | cut -d= -f2)
+PASS=$(grep '^PASSWORD' ~/GitHub/.tokens/svcclaude | cut -d= -f2)
 TOKEN=$(curl -sk -X POST \
   "https://vc.ed044990b4444c86b72971.eastus2.avs.azure.com/api/session" \
-  -u "$CREDS" \
+  -u "${USER}:${PASS}" \
   -H "Content-Type: application/json" | tr -d '"')
 ```
 
