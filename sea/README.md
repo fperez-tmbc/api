@@ -73,7 +73,7 @@ Response format: `{"args": {...}, "method": "on<Method>"}` on success, or an HTM
 | `TrustedRelays/GetData` | `{}` | Trusted relay IPs (empty) |
 | `MailDeliveryServers/GetData` | `{}` | Inbound delivery targets (empty) |
 | `Search/MessageForensics/Search` | see below | Message log search |
-| `Search/MailQueue/GetData` | `{}` | Current mail queue |
+| `Search/MailQueue/GetData` | `{}` | Current mail queue — **returns empty `data: {}` even when messages are queued (API blind spot; check UI)** |
 | `Search/Quarantine/GetData` | `{}` | Quarantine |
 
 ### MessageForensics Search
@@ -95,8 +95,36 @@ curl -sk -b /tmp/sea-cookies.txt \
 ```
 
 Date format: `MM/DD/YYYY`. Response includes `rowcount` and `row_data` array.
-Each `row_data` entry: `[base64_detail, timestamp, from, to, subject, relay_dest, ...]`
-The base64 field decodes to a tab-delimited MTA log line.
+
+**`row_data` field order (corrected):**
+
+| Index | Field |
+|-------|-------|
+| 0 | base64-encoded MTA log line |
+| 1 | timestamp |
+| 2 | from |
+| 3 | to |
+| 4 | relay_source (e.g. Mimecast IP, or SEA itself for outbound) |
+| 5 | relay_dest |
+| 6 | subject |
+
+**Decoded MTA log line** — tab-delimited, fields include:
+`source_IP`, `timestamp`, `action` (e.g. `ACCEPT`), `from`, `message_id`, `relay_dest`, `relay_source`, `recipients`, `classification`, `subject`, `size`, `RULE`, `relay_tls`, `direction`, `queue_ids`, `archive_refs`
+
+Decode with:
+```bash
+echo "<base64_field>" | base64 -d
+```
+
+### MessageDetails Popup
+
+The web UI uses a JS popup class (`Popup__MessageDetails`) opened with a `logdata` key from row_data[0]. The underlying endpoint **exists** but is not programmatically accessible:
+
+- `POST /ajax/Popup/MessageDetails/GetData` with `{logdata: <key>}` → HTTP 200 but returns `"logdata was not declared"` (Perl backend rejects the parameter)
+- `GET /Popup/MessageDetails.tabcontent?logdata=<key>` → 404
+- Parameter name variations (`log_data`, `ref`, `message_id`) → all rejected
+
+**Bottom line:** email headers and full message details are only accessible via the browser UI, not via curl.
 
 ## Current Configuration
 
@@ -110,12 +138,17 @@ The base64 field decodes to a tab-delimited MTA log line.
 
 ## Mail Flow (as observed)
 
-**Outbound:** `live_postmaster@opp.com` → `_itinfrastructure@opp.com` ~2×/day (system heartbeat)
+**Outbound:** `live_postmaster@opp.com` → `_itinfrastructure@opp.com` ~2×/day
+- SEA's own postmaster sender identity (system heartbeat) — not an external source
+- Relayed outbound via Mimecast smart host
 
 **Inbound:** External senders → `(2) Staging_QuestionnairesReceived@themyersbriggs.com`
 - Sources: direct SMTP, Brevo (sender-sib.com), Mailchimp (rsgsv.net)
-- These are OPP assessment questionnaire responses from participants
-- Delivered internally to 192.168.205.20
+- Full chain: Internet → Mimecast/MessageLabs → **SEA (192.168.205.21)** → **ASPDVFNP11 (192.168.205.20)** → **SVEXCHDC01 (10.70.16.178)**
+- ASPDVFNP11 is a **Windows Server 2008 IIS SMTP relay** — not Exchange; it forwards to SVEXCHDC01 via internal DNS MX
+- Internal DNS (ASPDVDMC01, 192.168.207.1) resolves `themyersbriggs.com` MX to `owa.themyersbriggs.com` → `SVEXCHDC01.cpp-db.com` (bypasses Mimecast for internal delivery)
+- ASPDVFNP11 also receives relay from **SVMONDC02 (10.70.16.102)** — two relay sources total
+- **Decommission dependency:** Both SEA and SVMONDC02 must be reconfigured before ASPDVFNP11 can be decommissioned
 
 ## PAN NAT
 
