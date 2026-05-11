@@ -548,6 +548,12 @@ Tested and confirmed invalid (return `4007 Invalid URL`):
 
 ## Scripting Gotchas
 
+### Don't call helper scripts as subprocesses inside a heredoc that already has a token
+
+`get-ticket.sh`, `update-ticket.sh`, and similar scripts each source `sdp-api.sh` and call `refresh_token` internally — they do not inherit `$ACCESS_TOKEN` from a parent shell. If you call one of these scripts as a subprocess (`zsh /path/to/get-ticket.sh`) inside a heredoc block that already called `refresh_token`, Zoho sees two rapid refresh calls and rate-limits the second one. The script then proceeds with an empty token, curl returns empty output, and any JSON parsing step fails with `Expecting value: line 1 column 1 (char 0)`.
+
+**Fix:** call `sdp_call` directly within the same heredoc that already holds a valid token, rather than spawning a helper script subprocess.
+
 ### zsh: never use `path` as a local variable name
 
 In zsh, `path` is a special array tied to `$PATH`. Inside a function, `local path=...` silently wipes `PATH` for that function's scope, causing `command not found: curl` (or any other external command). Use `endpoint`, `url_path`, or any other name instead.
