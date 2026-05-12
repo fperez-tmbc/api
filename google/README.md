@@ -81,6 +81,10 @@ $GAM user $USER delete events primary doit
 # 4. Contacts — delete saved contacts (Other Contacts are auto-saved metadata, no quota impact)
 $GAM user $USER print contacts fields name > /tmp/contacts.csv
 # (batch delete if contacts exist — see notes below)
+
+# 5. Google Photos — requires manual deletion; Photos Library API does not support DWD/service accounts
+# Script at clear_photos.py exists but will fail with 403 until Google adds DWD support
+# Have user log in to photos.google.com → select all → delete → empty trash
 ```
 
 ### Batch-clear multiple users
@@ -104,6 +108,12 @@ done
 
 ## Notes
 
+- **Google Photos**: Photos Library API does not support service accounts or DWD — manual
+  deletion only (`photos.google.com` → select all → delete → empty trash). Script
+  `clear_photos.py` is ready for if/when Google adds DWD support.
+- **Gmail deletion**: Use `clear_gmail.py` (not GAM) — GAM's `delete messages` query returns
+  at most 1 message due to a search limitation. The Python script uses `batchDelete` and
+  correctly processes all messages in pages of 500 including spam and trash.
 - **Other Contacts** (auto-saved from email): not deletable via GAM; they don't count
   toward shared storage quota so they won't block a Cloud Identity Free downgrade.
 - **Drive print filelist** only returns files the user *owns*. Files shared with them
