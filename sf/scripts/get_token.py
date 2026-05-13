@@ -57,7 +57,7 @@ def build_jwt(consumer_key, username, audience, private_key_path):
 
 
 def get_token(env):
-    creds_path = Path(__file__).parent.parent / ".salesforce-creds"
+    creds_path = Path.home() / "GitHub/.tokens/salesforce"
     creds = load_creds(creds_path)
 
     if env == "prod":

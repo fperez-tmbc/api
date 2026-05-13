@@ -1,5 +1,2 @@
-.salesforce-creds
-server.key
-server.crt
 .env
 .cloudflare-creds

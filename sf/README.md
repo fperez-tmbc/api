@@ -18,12 +18,12 @@ Server-to-server authentication using a self-signed X.509 certificate. No passwo
 
 ### Credentials file
 
-Stored in `.salesforce-creds` at the repo root (gitignored). Contains:
+Stored in `~/GitHub/.tokens/salesforce` (outside the repo). Contains:
 - `SF_CONSUMER_KEY_PROD` — Connected App Consumer Key for PROD
 - `SF_CONSUMER_KEY_SANDBOX` — Connected App Consumer Key for sandbox
 - `SF_USERNAME_PROD` — Salesforce username for PROD
 - `SF_USERNAME_SANDBOX` — Salesforce username for sandbox
-- `SF_PRIVATE_KEY_PATH` — path to the private key file (also gitignored)
+- `SF_PRIVATE_KEY_PATH` — path to the private key file (e.g. `~/GitHub/.tokens/salesforce.key`)
 
 ### Token exchange
 
@@ -77,7 +77,7 @@ openssl req -x509 -newkey rsa:2048 -keyout server.key -out server.crt -days 3650
   -subj "/CN=sf-api-automation"
 ```
 
-1Password record: `Salesforce Connected App — IT Automation (PROD)` — vault: IT Operations. Contains Consumer Key, Consumer Secret, and `server.key`.
+1Password record: `Salesforce Connected App — IT Automation (PROD)` — vault: IT Operations. Contains Consumer Key, Consumer Secret, and `server.key`. Private key goes to `~/GitHub/.tokens/salesforce.key`.
 
 ---
 
@@ -115,10 +115,11 @@ GET /services/data/v62.0/tooling/query?q=SELECT+Id,DeveloperName,MasterLabel,Aut
 
 ---
 
-## Gitignore
+## Credentials location
 
-```
-.salesforce-creds
-server.key
-server.crt
-```
+All credential files live outside the repo in `~/GitHub/.tokens/`:
+
+| File | Purpose |
+|------|---------|
+| `~/GitHub/.tokens/salesforce` | Creds file (`SF_CONSUMER_KEY_*`, `SF_USERNAME_*`, `SF_PRIVATE_KEY_PATH`) |
+| `~/GitHub/.tokens/salesforce.key` | RSA private key for JWT signing |
