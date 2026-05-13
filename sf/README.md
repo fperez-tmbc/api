@@ -28,15 +28,7 @@ Stored in `~/GitHub/.tokens/salesforce` (outside the repo). Contains:
 ### Token exchange
 
 ```bash
-source .salesforce-creds
-
-# Build and sign the JWT assertion
-JWT=$(python3 scripts/jwt_token.py --env prod)   # or --env sandbox
-
-# Exchange for an access token
-curl -s -X POST "https://login.salesforce.com/services/oauth2/token" \
-  -d "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer" \
-  -d "assertion=$JWT"
+python3 /Users/fperez2nd/GitHub/api/sf/scripts/get_token.py --env sandbox   # or --env prod
 ```
 
 Returns `access_token` and `instance_url`. Use as:
@@ -45,9 +37,15 @@ Returns `access_token` and `instance_url`. Use as:
 Authorization: Bearer <access_token>
 ```
 
+Token TTL is ~2 hours. Re-run the script to get a fresh token — there is no refresh token.
+
+### Connected App location
+
+The app lives under **Setup → Apps → External Client Apps** (not the regular App Manager). Sandbox app is named **IT Automation**, status Enabled.
+
 ### Connected App setup (one-time, per org)
 
-Use **Setup → App Manager → New External Client App** (the new UI — classic Connected Apps are replaced by External Client Apps).
+Use **Setup → Apps → External Client Apps → New External Client App**.
 
 **Basic Information:**
 - External Client App Name: `IT Automation`
@@ -77,7 +75,9 @@ openssl req -x509 -newkey rsa:2048 -keyout server.key -out server.crt -days 3650
   -subj "/CN=sf-api-automation"
 ```
 
-1Password record: `Salesforce Connected App — IT Automation (PROD)` — vault: IT Operations. Contains Consumer Key, Consumer Secret, and `server.key`. Private key goes to `~/GitHub/.tokens/salesforce.key`.
+1Password record: `Salesforce Connected App — IT Automation (PROD)` — vault: IT Operations. Contains Consumer Key, Consumer Secret, and `server.key` attachment. To restore credentials:
+1. Copy `server.key` attachment to `~/GitHub/.tokens/salesforce-app/server.key`
+2. Populate `~/GitHub/.tokens/salesforce` with Consumer Keys and usernames from the 1Password entry
 
 ---
 
@@ -122,4 +122,4 @@ All credential files live outside the repo in `~/GitHub/.tokens/`:
 | File | Purpose |
 |------|---------|
 | `~/GitHub/.tokens/salesforce` | Creds file (`SF_CONSUMER_KEY_*`, `SF_USERNAME_*`, `SF_PRIVATE_KEY_PATH`) |
-| `~/GitHub/.tokens/salesforce.key` | RSA private key for JWT signing |
+| `~/GitHub/.tokens/salesforce-app/server.key` | RSA private key for JWT signing (sourced from 1Password attachment) |
