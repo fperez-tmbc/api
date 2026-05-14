@@ -125,9 +125,11 @@ foreach ($upn in ($completed | ForEach-Object { $_.UPN })) {
     $alias  = $aliasToUpn.Keys | Where-Object { $aliasToUpn[$_] -eq $upn }
     $before = $statsBefore[$upn]
     $after  = Get-MailboxStatistics -Identity $upn -ErrorAction SilentlyContinue
-    $deltaItems = $after.ItemCount - $before.ItemCount
-    $deltaBytes = $after.TotalItemSize.Value.ToBytes() - $before.TotalItemSize.Value.ToBytes()
-    $deltaMB    = [math]::Round($deltaBytes / 1MB, 1)
+    $deltaItems  = $after.ItemCount - $before.ItemCount
+    $beforeBytes = if ([string]$before.TotalItemSize -match '\((\d[\d,]*) bytes\)') { [long]($matches[1] -replace ',','') } else { 0 }
+    $afterBytes  = if ([string]$after.TotalItemSize  -match '\((\d[\d,]*) bytes\)') { [long]($matches[1] -replace ',','') } else { 0 }
+    $deltaBytes  = $afterBytes - $beforeBytes
+    $deltaMB     = [math]::Round($deltaBytes / 1MB, 1)
     Write-Host "  $alias"
     Write-Host "    Before: $($before.TotalItemSize) / $($before.ItemCount) items"
     Write-Host "    After:  $($after.TotalItemSize) / $($after.ItemCount) items"
