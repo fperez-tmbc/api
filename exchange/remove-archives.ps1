@@ -61,6 +61,15 @@ if ($toProcess.Count -eq 0) {
 
 $aliases = @($aliasToUpn.Keys)
 
+# ── Snapshot primary mailbox stats before restore ─────────────────────────────
+Write-Host "`n[Pre-check] Capturing primary mailbox stats..." -ForegroundColor Cyan
+$statsBefore = @{}
+foreach ($upn in $toProcess) {
+    $s = Get-MailboxStatistics -Identity $upn -ErrorAction SilentlyContinue
+    $statsBefore[$upn] = $s
+    Write-Host "  $($aliasToUpn.Keys | Where-Object { $aliasToUpn[$_] -eq $upn }): $($s.TotalItemSize) / $($s.ItemCount) items"
+}
+
 # ── Phase 1: Create restore requests ─────────────────────────────────────────
 Write-Host "`n[Phase 1] Creating restore requests for $($toProcess.Count) user(s)..." -ForegroundColor Cyan
 
@@ -109,6 +118,21 @@ do {
 
 $completed = @($stats | Where-Object { $_.PercentComplete -eq 100 })
 $failed    = @($stats | Where-Object { [string]$_.Status -in @('Failed', '6') })
+
+# ── Post-restore mailbox size comparison ─────────────────────────────────────
+Write-Host "`n[Post-check] Primary mailbox size after restore:" -ForegroundColor Cyan
+foreach ($upn in ($completed | ForEach-Object { $_.UPN })) {
+    $alias  = $aliasToUpn.Keys | Where-Object { $aliasToUpn[$_] -eq $upn }
+    $before = $statsBefore[$upn]
+    $after  = Get-MailboxStatistics -Identity $upn -ErrorAction SilentlyContinue
+    $deltaItems = $after.ItemCount - $before.ItemCount
+    $deltaBytes = $after.TotalItemSize.Value.ToBytes() - $before.TotalItemSize.Value.ToBytes()
+    $deltaMB    = [math]::Round($deltaBytes / 1MB, 1)
+    Write-Host "  $alias"
+    Write-Host "    Before: $($before.TotalItemSize) / $($before.ItemCount) items"
+    Write-Host "    After:  $($after.TotalItemSize) / $($after.ItemCount) items"
+    Write-Host "    Delta:  +$($deltaMB) MB / +$deltaItems items"
+}
 
 if ($failed.Count -gt 0) {
     Write-Warning "The following restore requests FAILED and will be skipped:"
