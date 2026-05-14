@@ -86,8 +86,14 @@ Write-Host "`n[Phase 2] Monitoring restore requests (polling every 60s)..." -For
 do {
     Start-Sleep -Seconds 60
     $stats = foreach ($upn in $toProcess) {
-        Get-MailboxRestoreRequestStatistics -Identity $requestIds[$upn] -ErrorAction SilentlyContinue |
-            Select-Object @{N='UPN';E={$upn}}, TargetAlias, Status, PercentComplete, BytesTransferred
+        $s = Get-MailboxRestoreRequestStatistics -Identity $requestIds[$upn] -ErrorAction SilentlyContinue
+        if ($s) {
+            $s | Select-Object @{N='UPN';E={$upn}}, TargetAlias, Status, PercentComplete, BytesTransferred
+        } else {
+            # Request completed and is no longer queryable — treat as completed
+            Write-Host "    $($aliasToUpn.Keys | Where-Object { $aliasToUpn[$_] -eq $upn }): Completed (too fast to poll)"
+            [PSCustomObject]@{ UPN=$upn; TargetAlias=($aliasToUpn.Keys | Where-Object { $aliasToUpn[$_] -eq $upn }); Status='Completed'; PercentComplete=100; BytesTransferred=$null }
+        }
     }
 
     Write-Host "  [$(Get-Date -Format 'HH:mm:ss')]"
@@ -96,11 +102,13 @@ do {
         Write-Host "    $($s.TargetAlias): $($s.Status) ($($s.PercentComplete)%$xfer)"
     }
 
-    $pending = @($stats | Where-Object { $_.Status -notin @('Completed', 'Failed') })
+    # Status may be returned as string ("Completed") or integer enum (e.g. 10 = Completed)
+    # Use PercentComplete as the reliable completion indicator
+    $pending = @($stats | Where-Object { $_.PercentComplete -lt 100 -and [string]$_.Status -notin @('Failed', '6') })
 } while ($pending.Count -gt 0)
 
-$completed = @($stats | Where-Object { $_.Status -eq 'Completed' })
-$failed    = @($stats | Where-Object { $_.Status -eq 'Failed' })
+$completed = @($stats | Where-Object { $_.PercentComplete -eq 100 })
+$failed    = @($stats | Where-Object { [string]$_.Status -in @('Failed', '6') })
 
 if ($failed.Count -gt 0) {
     Write-Warning "The following restore requests FAILED and will be skipped:"
