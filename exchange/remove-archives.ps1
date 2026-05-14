@@ -117,7 +117,7 @@ do {
 } while ($pending.Count -gt 0)
 
 $completed = @($stats | Where-Object { $_.PercentComplete -eq 100 })
-$failed    = @($stats | Where-Object { [string]$_.Status -in @('Failed', '6') })
+$failed    = @($stats | Where-Object { $_.PercentComplete -lt 100 })
 
 # ── Post-restore mailbox size comparison ─────────────────────────────────────
 Write-Host "`n[Post-check] Primary mailbox size after restore:" -ForegroundColor Cyan
