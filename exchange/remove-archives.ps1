@@ -84,7 +84,7 @@ if ($existing.Count -gt 0) {
 $requestIds = @{}  # UPN -> request identity
 foreach ($upn in $toProcess) {
     $req = New-MailboxRestoreRequest -SourceMailbox $upn -SourceIsArchive `
-        -TargetMailbox $upn -ErrorAction Stop
+        -TargetMailbox $upn -ConflictResolutionOption UpdateFromSource -ErrorAction Stop
     $requestIds[$upn] = $req.Identity
     Write-Host "  Queued: $upn"
 }
