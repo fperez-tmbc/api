@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+"""
+igraph — Intune Graph API CLI wrapper
+Uses claude-exo cert for app-only auth (no interactive login required).
+
+Usage:
+  igraph <path> [query]                     GET
+  igraph GET <path> [query]                 GET with explicit method
+  igraph POST <path> <json-body>            POST
+  igraph PATCH <path> <json-body>           PATCH
+  igraph DELETE <path>                      DELETE
+
+Examples:
+  igraph /deviceManagement/deviceConfigurations
+  igraph /deviceManagement/deviceConfigurations '$filter=displayName eq '"'"'Drata - Screen Lock'"'"''
+  igraph /deviceManagement/deviceConfigurations/622d91cc-a734-477c-8fe9-efa4082728f2/assignments
+  igraph PATCH /deviceManagement/deviceConfigurations/622d91cc.../assignments '{"target":{"@odata.type":"..."}}'
+"""
+
+import sys, json, time, uuid, base64
+from pathlib import Path
+
+try:
+    import jwt
+    import requests
+    from cryptography.hazmat.primitives import serialization, hashes
+    from cryptography.hazmat.backends import default_backend
+    from cryptography import x509
+except ImportError:
+    print("Missing deps. Run: pip3 install PyJWT cryptography requests --break-system-packages", file=sys.stderr)
+    sys.exit(1)
+
+TENANT   = "d5c15341-dfce-470a-bfdf-72c3dab91e7c"
+APP_ID   = "69de0375-242d-4b8a-94df-4e095ab81cea"
+CERT_DIR = Path.home() / "GitHub/.tokens/exo-claude"
+GRAPH    = "https://graph.microsoft.com/v1.0"
+
+def get_token():
+    cert_data = (CERT_DIR / "cert.pem").read_bytes()
+    key_data  = (CERT_DIR / "key.pem").read_bytes()
+    cert = x509.load_pem_x509_certificate(cert_data, default_backend())
+    x5t  = base64.urlsafe_b64encode(cert.fingerprint(hashes.SHA1())).rstrip(b"=").decode()
+    key  = serialization.load_pem_private_key(key_data, password=None, backend=default_backend())
+    now  = int(time.time())
+    assertion = jwt.encode(
+        {"aud": f"https://login.microsoftonline.com/{TENANT}/oauth2/v2.0/token",
+         "iss": APP_ID, "sub": APP_ID, "jti": str(uuid.uuid4()), "nbf": now, "exp": now + 300},
+        key, algorithm="RS256", headers={"x5t": x5t}
+    )
+    r = requests.post(
+        f"https://login.microsoftonline.com/{TENANT}/oauth2/v2.0/token",
+        data={"client_id": APP_ID,
+              "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+              "client_assertion": assertion,
+              "scope": "https://graph.microsoft.com/.default",
+              "grant_type": "client_credentials"}
+    )
+    result = r.json()
+    if "access_token" not in result:
+        print("Auth error:", json.dumps(result, indent=2), file=sys.stderr)
+        sys.exit(1)
+    return result["access_token"]
+
+def main():
+    args = sys.argv[1:]
+    if not args or args[0] in ("-h", "--help"):
+        print(__doc__)
+        sys.exit(0)
+
+    METHODS = {"GET", "POST", "PATCH", "PUT", "DELETE"}
+    if args[0].upper() in METHODS:
+        method, args = args[0].upper(), args[1:]
+    else:
+        method = "GET"
+
+    if not args:
+        print("Error: path required.", file=sys.stderr)
+        sys.exit(1)
+
+    path = args[0].lstrip("/")
+    url  = f"{GRAPH}/{path}"
+
+    body = None
+    if method in ("POST", "PATCH", "PUT") and len(args) > 1:
+        try:
+            body = json.loads(args[1])
+        except json.JSONDecodeError as e:
+            print(f"Invalid JSON body: {e}", file=sys.stderr)
+            sys.exit(1)
+    elif method == "GET" and len(args) > 1:
+        # treat second arg as raw query string
+        url = f"{url}?{args[1]}" if "?" not in url else f"{url}&{args[1]}"
+
+    token   = get_token()
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    r = requests.request(method, url, headers=headers, json=body)
+
+    if r.status_code == 204:
+        print(f"HTTP {r.status_code} No Content")
+        return
+
+    try:
+        print(json.dumps(r.json(), indent=2))
+    except Exception:
+        print(f"HTTP {r.status_code}: {r.text}")
+
+    if not r.ok:
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
