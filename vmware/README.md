@@ -100,6 +100,10 @@ Guest power operations require VMware Tools to be running in the VM.
 - **Rename / move to folder:** not exposed in the Automation API — use PowerCLI (`Set-VM`, `Move-VM`) for these operations.
 - **Resource pool assignment:** similarly not available via REST; use PowerCLI.
 - **Guest power requires VMware Tools:** if Tools is not running, fall back to hard `stop`/`start`.
+- **Disk resize:** REST API `PATCH /hardware/disk/{id}` does not support `capacity` or any capacity field — the `update_spec` has no capacity field at all. Use PowerCLI `Set-HardDisk -CapacityGB` instead. Requires `VirtualMachine.Config.DiskExtend` privilege on the VM.
+- **Guest process execution:** `POST /api/vcenter/vm/{vm}/guest/processes` returns 404 on AVS — guest operations API is not available. Use SSH (port 22 — OpenSSH enabled on domain-joined Windows Server VMs) or WinRM (port 5985) instead. SSH with UPN format: `sshpass -p "$PASS" ssh "svcclaude@cpp-db.com@<ip>"`.
+- **Windows disk → vSphere disk mapping:** Windows Disk N corresponds to vSphere SCSI 0:N (disk ID 200N). Disk 0 = C: (OS), subsequent disks follow SCSI unit order. Verify via SSH: `Get-Partition | Where-Object {$_.DriveLetter} | Select-Object DiskNumber, DriveLetter`.
+- **Windows partition extension after disk resize:** After growing the VMDK, SSH in and run `Resize-Partition -DiskNumber N -PartitionNumber N -Size (Get-PartitionSupportedSize ...).SizeMax` to extend the NTFS partition.
 
 ## PowerCLI Fallback
 
