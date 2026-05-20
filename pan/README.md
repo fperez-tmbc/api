@@ -126,6 +126,26 @@ Key fields: tunnel interface, IKE gateway, IPsec crypto profile, DPD restart.
 - xpath: `/config/devices/entry/vsys/entry/global-protect/global-protect-gateway/entry/remote-user-tunnel-configs/entry[@name='EMPLOYEES']/split-tunneling/access-route`
 - Element to add a network: `<member>10.50.240.0/22</member>`
 
+## Software Management (SSH)
+
+Software delete/download is not exposed via XML API (code 17). Use SSH via stdin heredoc:
+
+```bash
+sshpass -p 'PASSWORD' ssh -o StrictHostKeyChecking=no svcclaude@avspan01.cpp-db.com << 'EOF'
+delete software version 11.2.10-h7
+request system software check
+request system software download version 11.2.10-h8
+show jobs id <JOBID>
+exit
+EOF
+```
+
+- `delete software version <ver>` — removes a downloaded image
+- `request system software check` — refreshes available version list from Palo Alto (required before downloading a newly released version)
+- `request system software download version <ver>` — enqueues a download job, prints job ID
+- `request system software info` — lists all versions and downloaded status
+- Poll with `show jobs id <JOBID>` until `FIN / OK`
+
 ## Commit
 
 - Always poll job status: `type=op`, `cmd=<show><jobs><id>JOBID</id></jobs></show>`
