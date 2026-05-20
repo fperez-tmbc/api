@@ -143,6 +143,8 @@ Full environment inventory retrieved from LCS API (project 1362199) on 2026-05-0
 
 The token scope must match the target environment's base URL (without `/data/`). For PROD use `https://tmbc.operations.dynamics.com/.default`, for TMBC-QA use `https://tmbc-qa8d63c1875ae9cc21aos.axcloud.dynamics.com/.default`, etc.
 
+> **Convention:** When "DEV" is referenced without further qualification, it means **TMBC-DEVTEST39** (`https://tmbc-devtest399b0871be35c27446aos.axcloud.dynamics.com/`).
+
 ---
 
 ## Entity Discovery
