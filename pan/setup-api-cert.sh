@@ -24,6 +24,23 @@ TOKEN=$(curl -sk "https://$HOST/api/" \
 [[ -z "$TOKEN" ]] && { echo "ERROR: Failed to get token. Check credentials/hostname."; exit 1; }
 echo "OK"
 
+# Check PAN-OS version — API key cert feature requires 11.x+
+SWVER=$(curl -sk "https://$HOST/api/" \
+  --data-urlencode "type=op" \
+  --data-urlencode "key=$TOKEN" \
+  --data-urlencode "cmd=<show><system><info/></system></show>" | grep -o '<sw-version>[^<]*' | cut -d'>' -f2)
+MAJOR=${SWVER%%.*}
+echo "PAN-OS version: $SWVER"
+
+if [[ $MAJOR -lt 11 ]]; then
+  echo "API key certificate feature requires PAN-OS 11+. Skipping cert setup."
+  echo "Saving standard token..."
+  echo -n "$TOKEN" > "$TOKENFILE"
+  echo "Token saved to $TOKENFILE"
+  echo "Done."
+  exit 0
+fi
+
 # Generate cert
 echo "Generating certificate..."
 openssl req -x509 -newkey rsa:4096 -keyout /tmp/pan-api.key -out /tmp/pan-api.crt \
