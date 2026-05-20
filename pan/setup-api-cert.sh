@@ -1,10 +1,10 @@
-#!/usr/bin/env bash
+#!/usr/bin/env zsh
 set -e
 
-read -rp "PAN hostname (e.g. aupan01.cpp-db.com): " HOST
-read -rp "Admin username: " ADMIN_USER
-read -rsp "Admin password: " PW; echo
-read -rp "Token label (saved to ~/GitHub/.tokens/pan-<label>): " LABEL
+read -r "HOST?PAN hostname (e.g. aupan01.cpp-db.com): "
+read -r "ADMIN_USER?Admin username: "
+read -rs "PW?Admin password: "; echo
+read -r "LABEL?Token label (saved to ~/GitHub/.tokens/pan-<label>): "
 
 TOKENFILE=~/GitHub/.tokens/pan-$LABEL
 CERTPASS=pan-api-cert-setup
