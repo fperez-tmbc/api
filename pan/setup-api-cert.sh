@@ -73,6 +73,7 @@ JOBID=$(curl -sk "https://$HOST/api/" \
   --data-urlencode "key=$TOKEN" \
   --data-urlencode "cmd=<commit/>" | grep -o 'job>[0-9]*' | cut -d'>' -f2)
 echo "Job $JOBID — polling until complete..."
+TRIES=0
 while true; do
   sleep 10
   RESULT=$(curl -sk "https://$HOST/api/" \
@@ -80,10 +81,14 @@ while true; do
     --data-urlencode "key=$TOKEN" \
     --data-urlencode "cmd=<show><jobs><id>$JOBID</id></jobs></show>")
   STATUS=$(echo "$RESULT" | grep -o '<status>[^<]*' | cut -d'>' -f2)
-  echo "  status: $STATUS"
+  echo "  status: ${STATUS:-ERROR — full response: $RESULT}"
   [[ "$STATUS" == "FIN" ]] && break
+  TRIES=$((TRIES + 1))
+  if [[ $TRIES -ge 30 ]]; then
+    echo "ERROR: Timed out waiting for commit after 5 minutes."
+    exit 1
+  fi
 done
-echo "$RESULT"
 echo
 
 # Regenerate token (now cert-based)
