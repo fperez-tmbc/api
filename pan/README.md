@@ -1,20 +1,27 @@
-# PAN-OS XML API — avspan01 Field Notes
+# PAN-OS XML API Field Notes
 
-## Credentials
+## Devices & Tokens
 
-- **Token:** `~/GitHub/.tokens/pan` — certificate-based format `hash:base64url`
-- Generated under Device → Setup → Management → API-KEY-CERT
+| Device | Base URL | Token file |
+|--------|----------|------------|
+| AVSPAN01 | `https://avspan01.cpp-db.com/api/` | `~/.tokens/pan` |
+| AVSPAN02 | `https://avspan02.cpp-db.com/api/` | `~/.tokens/pan` (same — HA pair shares token) |
+| WHPAN01 | `https://whpan01.cpp-db.com/api/` | `~/.tokens/pan-wh` |
+| WHPAN02 | `https://whpan02.cpp-db.com/api/` | `~/.tokens/pan-wh` (same — HA pair shares token) |
+
+- Token format: `hash:base64url` (certificate-based)
+- Same API token works on both peers of an HA pair
+- **SSH key auth (svcclaude):** `~/.tokens/svcclaude-key` — configured on all four firewalls
 
 ## General
 
-- **Base URL:** `https://avspan01.cpp-db.com/api/`
 - **Device entry name:** `localhost.localdomain`
 - Always use `--data-urlencode` with curl for all parameters
 
 ### Common curl pattern
 
 ```bash
-TOKEN=$(cat ~/GitHub/.tokens/pan)
+TOKEN=$(cat ~/GitHub/.tokens/pan | tr -d '[:space:]')
 curl -sk "https://avspan01.cpp-db.com/api/" \
   --data-urlencode "type=config" \
   --data-urlencode "action=get" \
@@ -126,25 +133,101 @@ Key fields: tunnel interface, IKE gateway, IPsec crypto profile, DPD restart.
 - xpath: `/config/devices/entry/vsys/entry/global-protect/global-protect-gateway/entry/remote-user-tunnel-configs/entry[@name='EMPLOYEES']/split-tunneling/access-route`
 - Element to add a network: `<member>10.50.240.0/22</member>`
 
-## Software Management (SSH)
+## Software Management
 
-Software delete/download is not exposed via XML API (code 17). Use SSH via stdin heredoc:
+### Downloads and version listing (API)
 
 ```bash
-sshpass -p 'PASSWORD' ssh -o StrictHostKeyChecking=no svcclaude@avspan01.cpp-db.com << 'EOF'
-delete software version 11.2.10-h7
-request system software check
-request system software download version 11.2.10-h8
-show jobs id <JOBID>
-exit
-EOF
+# Check / refresh available versions
+type=op  cmd=<request><system><software><check/></software></system></request>
+
+# Download a version — returns job ID
+type=op  cmd=<request><system><software><download><version>11.2.10-h8</version></download></software></system></request>
 ```
 
-- `delete software version <ver>` — removes a downloaded image
-- `request system software check` — refreshes available version list from Palo Alto (required before downloading a newly released version)
-- `request system software download version <ver>` — enqueues a download job, prints job ID
+- Always run `check` before verifying downloaded state — the local list can be stale
+- Verify with `check` then confirm `<downloaded>yes</downloaded>` for target version
+
+### Install, delete, reboot (SSH only — not exposed via API)
+
+Use key-based SSH with stdin heredoc. Include `y` to answer confirmation prompts; if heredoc `y` gets stuck use `printf`:
+
+```bash
+# Key-based (preferred)
+ssh -i ~/.tokens/svcclaude-key -o StrictHostKeyChecking=no -o PasswordAuthentication=no svcclaude@<host> << 'EOF'
+request system software install version 11.2.10-h8
+y
+exit
+EOF
+
+# Reboot (use printf if heredoc y gets stuck)
+printf 'request restart system\ny\nexit\n' | ssh -i ~/.tokens/svcclaude-key \
+  -o StrictHostKeyChecking=no -o PasswordAuthentication=no svcclaude@<host>
+```
+
+- `delete software version <ver>` — removes a downloaded image (SSH only)
+- `request system software install version <ver>` — prompts for `y`; enqueues install job
 - `request system software info` — lists all versions and downloaded status
-- Poll with `show jobs id <JOBID>` until `FIN / OK`
+- `request restart system` — prompts for `y`; exit code 255 on success (session drops with device)
+- Poll install job: `show jobs id <JOBID>` until `FIN / OK`
+
+### Upgrade order for HA pairs
+
+1. Download on both peers in parallel (API)
+2. Verify downloaded state on both (API check)
+3. Install + reboot passive peer first; wait for it to return to passive HA state before touching active
+4. Install + reboot active peer; brief failover to other peer expected
+5. Confirm both show `FIN / OK` version and HA state synchronized
+6. Delete old version from both (SSH), verify via API check
+
+## API Key Certificate Setup
+
+PAN-OS will warn about deprecated keygen algorithm if no API key certificate is configured. Fix:
+
+1. Generate a self-signed cert locally and import as PKCS12:
+```bash
+openssl req -x509 -newkey rsa:4096 -keyout /tmp/pan-api.key -out /tmp/pan-api.crt \
+  -days 3650 -nodes -subj "/CN=<hostname>/O=TMBC/OU=Network/C=US"
+openssl pkcs12 -export -out /tmp/pan-api.p12 \
+  -inkey /tmp/pan-api.key -in /tmp/pan-api.crt -passout pass:<passphrase>
+```
+2. Import to firewall:
+```bash
+curl -sk "https://<host>/api/" -F "type=import" -F "category=keypair" \
+  -F "certificate-name=API-KEY-CERT" -F "format=pkcs12" \
+  -F "passphrase=<passphrase>" -F "key=$TOKEN" -F "file=@/tmp/pan-api.p12"
+```
+3. Set as API key certificate:
+```
+type=config  action=set
+xpath=/config/devices/entry[@name='localhost.localdomain']/deviceconfig/setting/management/api
+element=<key><certificate>API-KEY-CERT</certificate></key>
+```
+4. Commit, then have admin regenerate the API key via browser or `read -s` curl keygen call
+5. Delete temp files from `/tmp`
+
+## Admin Accounts
+
+xpath: `/config/mgt-config/users`
+
+- Add account: `action=set`, element `<entry name='USERNAME'><permissions><role-based><superuser>yes</superuser></role-based></permissions><authentication-profile>PROFILE</authentication-profile></entry>`
+- Delete account: `action=delete`, xpath `.../entry[@name='USERNAME']`
+- Add SSH public key: `action=set`, xpath `.../entry[@name='USERNAME']`, element `<public-key>BASE64_OF_FULL_PUBKEY_LINE</public-key>`
+
+## HA State Check
+
+```bash
+show high-availability state
+```
+
+Key fields to verify after upgrade/reboot:
+- `State: active` / `State: passive` — both peers present
+- `Software Version: Match`
+- `State Synchronization: Complete`
+- `Running Configuration: synchronized`
+- HA1/HA2 `Connection up`
+
+Anti-Virus `Mismatch` after upgrade is normal (content version difference) and does not affect HA operation.
 
 ## Commit
 
