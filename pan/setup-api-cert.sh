@@ -1,7 +1,8 @@
 #!/usr/bin/env zsh
 set -e
 
-read -r "HOST?PAN hostname (e.g. aupan01.cpp-db.com): "
+read -r "HOST?PAN hostname (e.g. aupan01): "
+HOST="${HOST}.cpp-db.com"
 read -r "ADMIN_USER?Admin username: "
 read -rs "PW?Admin password: "; echo
 read -r "LABEL?Token label (saved to ~/GitHub/.tokens/pan-<label>): "
