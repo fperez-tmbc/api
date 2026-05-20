@@ -18,7 +18,10 @@
 - AU/FR pairs run PAN-OS 10.2.x — standard token format, no API key cert setup needed
 - DCPANORAMA01 runs PAN-OS 11.2.x — cert-based token
 - Same API token works on both peers of an HA pair
-- **SSH key auth (svcclaude):** `~/.tokens/svcclaude-key` — configured on AVSPAN01/02 and WHPAN01/02; not yet configured on AU/FR pairs or Panorama
+- **SSH key auth (svcclaude):**
+  - AVSPAN, WHPAN, DCPANORAMA01 (PAN-OS 11.x): ed25519 — `~/.tokens/svcclaude-key`
+  - AUPAN, FRPAN (PAN-OS 10.2.x): RSA 4096 — `~/.tokens/svcclaude-key-rsa`
+  - PAN-OS 10.2.x rejects ed25519 via API; RSA uses same base64(full_key_line) format as 11.x
 
 ## General
 
