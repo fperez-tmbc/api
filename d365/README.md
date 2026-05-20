@@ -362,6 +362,28 @@ curl -s -X POST "${BASE_URL}/data/SecurityUserRoleAssociations" \
 
 Fields returned on success: `UserId`, `SecurityRoleIdentifier`, `AssignmentStatus`, `AssignmentMode`, `SecurityRoleName`.
 
+### Disable (or re-enable) a role assignment
+
+**Do not use DELETE** — `DELETE /data/SecurityUserRoleAssociations(...)` silently returns 204 without removing the record. The correct approach is PATCH with `AssignmentStatus`:
+
+```bash
+# Disable a role assignment
+curl -s -X PATCH \
+  "${BASE_URL}/data/SecurityUserRoleAssociations(UserId='jsmith',SecurityRoleIdentifier='DOCENTRICAXVIEWER')" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"AssignmentStatus": "Disabled"}'
+
+# Re-enable a role assignment
+curl -s -X PATCH \
+  "${BASE_URL}/data/SecurityUserRoleAssociations(UserId='jsmith',SecurityRoleIdentifier='DOCENTRICAXVIEWER')" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"AssignmentStatus": "Enabled"}'
+```
+
+Both return 204 on success. Verify via `SecurityUserRoleAssociations` (not `SecurityUserRoles` — the read-only view may cache stale state).
+
 ### Check a user's current role assignments
 
 ```bash
@@ -423,6 +445,36 @@ curl -s -G "${BASE_URL}/data/SystemUsers" \
 ```
 
 User IDs follow a first-initial + last-name pattern, truncated to ~8 characters (e.g., `jsmith`, `csamwort`, `swhitema`). PROD and UAT use the same user IDs.
+
+### Direct key lookup for SystemUsers
+
+`$filter=UserId eq '<id>'` is unreliable on the `SystemUsers` entity — it returns empty results even when the user exists. Use the direct key form instead:
+
+```bash
+curl -s "${BASE_URL}/data/SystemUsers('jsmith')" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Accept: application/json"
+```
+
+### Enable / disable a user account
+
+The field is `Enabled` (boolean). PATCH the user directly:
+
+```bash
+# Disable
+curl -s -X PATCH "${BASE_URL}/data/SystemUsers('jsmith')" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"Enabled": false}'
+
+# Enable
+curl -s -X PATCH "${BASE_URL}/data/SystemUsers('jsmith')" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"Enabled": true}'
+```
+
+A 204 response indicates success. Note: other Yes/No fields on `SystemUsers` use strings (`"Yes"`/`"No"`), but `Enabled` is a true boolean.
 
 ### Legal entity company codes (UAT/PROD confirmed)
 
@@ -543,6 +595,10 @@ curl -s -G "${BASE_URL}/data/Entity" \
   --data-urlencode "\$filter=UserId eq 'x'" \
   --data-urlencode "\$select=UserId"
 ```
+
+### `DELETE` on `SecurityUserRoleAssociations` is a silent no-op
+
+`DELETE /data/SecurityUserRoleAssociations(UserId='...',SecurityRoleIdentifier='...')` returns 204 but does not remove the record. To remove a role from a user, PATCH `AssignmentStatus` to `"Disabled"` instead. See the Security Role Management section for the correct pattern.
 
 ### `SecurityUserRoleAssociations` requires `SecurityRoleName` in POST body
 
