@@ -72,12 +72,18 @@ JOBID=$(curl -sk "https://$HOST/api/" \
   --data-urlencode "type=commit" \
   --data-urlencode "key=$TOKEN" \
   --data-urlencode "cmd=<commit/>" | grep -o 'job>[0-9]*' | cut -d'>' -f2)
-echo "Job $JOBID — waiting 15s..."
-sleep 15
-curl -sk "https://$HOST/api/" \
-  --data-urlencode "type=op" \
-  --data-urlencode "key=$TOKEN" \
-  --data-urlencode "cmd=<show><jobs><id>$JOBID</id></jobs></show>"
+echo "Job $JOBID — polling until complete..."
+while true; do
+  sleep 10
+  RESULT=$(curl -sk "https://$HOST/api/" \
+    --data-urlencode "type=op" \
+    --data-urlencode "key=$TOKEN" \
+    --data-urlencode "cmd=<show><jobs><id>$JOBID</id></jobs></show>")
+  STATUS=$(echo "$RESULT" | grep -o '<status>[^<]*' | cut -d'>' -f2)
+  echo "  status: $STATUS"
+  [[ "$STATUS" == "FIN" ]] && break
+done
+echo "$RESULT"
 echo
 
 # Regenerate token (now cert-based)
