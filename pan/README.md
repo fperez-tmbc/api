@@ -276,6 +276,12 @@ delete debug-log mp-log file *.3
 delete debug-log mp-log file *.4
 delete debug-log mp-log file *.old
 
+# Delete a specific downloaded content package (SSH) — also auto-purges corresponding oldcontent dir
+delete content update panupv2-all-contents-<version>.tgz
+
+# Delete a specific downloaded AV package (SSH)
+delete anti-virus update panup-all-antivirus-<version>.tgz
+
 # Clear old content cache (API op or SSH)
 delete content cache old-content
 ```
@@ -286,6 +292,14 @@ delete content cache old-content
 - `debug pancfg-directory-usage clean dynamic-updates content update <TAB>` — old downloaded content .tgz packages
 - `delete global-protect-client image <TAB>` / `delete global-protect-client version <TAB>` — old GP client images (~551M)
 - `debug software disk-usage aggressive-cleaning enable` → confirm `y`
+
+### content-preview disk accumulation (PAN-300055)
+Known bug: firewall accumulates large content-preview directories in `/opt/pancfg/mgmt/content-preview/<version>/` when an error occurs during content update cleanup. Normal size is ~19M per version; bug leaves behind 1GB+.
+- `delete content preview <version>` — Invalid syntax on 10.2.x
+- `delete content update <filename.tgz>` — removes the downloaded package but does NOT clear the preview directory
+- Config xpath `/config/shared/content-preview` exists but does not contain version-specific entries — config delete won't help
+- PAN-300055 not fixed in 10.2.18-h1 — watch future hotfix release notes
+- Workaround: none found via non-interactive SSH; may require interactive session or TAC
 
 ### Non-deletable items
 - `updates/oldav` and `updates/oldcontent` — extracted previously-installed packages; system-managed, not removable by user commands
