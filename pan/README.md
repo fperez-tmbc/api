@@ -4,8 +4,8 @@
 
 | Device | Base URL | Token file |
 |--------|----------|------------|
-| AVSPAN01 | `https://avspan01.cpp-db.com/api/` | `~/.tokens/pan` |
-| AVSPAN02 | `https://avspan02.cpp-db.com/api/` | `~/.tokens/pan` (same — HA pair shares token) |
+| AVSPAN01 | `https://avspan01.cpp-db.com/api/` | `~/.tokens/pan-avs` |
+| AVSPAN02 | `https://avspan02.cpp-db.com/api/` | `~/.tokens/pan-avs` (same — HA pair shares token) |
 | WHPAN01 | `https://whpan01.cpp-db.com/api/` | `~/.tokens/pan-wh` |
 | WHPAN02 | `https://whpan02.cpp-db.com/api/` | `~/.tokens/pan-wh` (same — HA pair shares token) |
 
@@ -21,7 +21,7 @@
 ### Common curl pattern
 
 ```bash
-TOKEN=$(cat ~/GitHub/.tokens/pan | tr -d '[:space:]')
+TOKEN=$(cat ~/GitHub/.tokens/pan-avs | tr -d '[:space:]')
 curl -sk "https://avspan01.cpp-db.com/api/" \
   --data-urlencode "type=config" \
   --data-urlencode "action=get" \
