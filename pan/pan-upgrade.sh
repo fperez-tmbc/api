@@ -80,8 +80,11 @@ echo "Install job ID: ${jobid}"
 poll_job "$jobid" "Install" || exit 1
 
 echo "=== Install complete — rebooting ${HOST} ==="
-printf 'request restart system\ny\nexit\n' | \
-  ssh "${SSH_OPTS[@]}" "svcclaude@${HOST}" 2>/dev/null || true
+ssh "${SSH_OPTS[@]}" "svcclaude@${HOST}" 2>/dev/null << 'REBOOT' || true
+request restart system
+y
+exit
+REBOOT
 
 echo "Reboot sent. Waiting 5 minutes before polling..."
 sleep 300
