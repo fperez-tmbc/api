@@ -143,6 +143,43 @@ Key fields: tunnel interface, IKE gateway, IPsec crypto profile, DPD restart.
 - xpath: `/config/devices/entry/vsys/entry/global-protect/global-protect-gateway/entry/remote-user-tunnel-configs/entry[@name='EMPLOYEES']/split-tunneling/access-route`
 - Element to add a network: `<member>10.50.240.0/22</member>`
 
+## GlobalProtect Client Management
+
+GP client packages are managed on the firewall and pushed to endpoints by GlobalProtect gateway.
+
+### API commands (type=op)
+
+```bash
+# Check for available versions (refreshes the list)
+cmd=<request><global-protect-client><software><check/></software></global-protect-client></request>
+
+# Download a specific version — returns job ID; poll until FIN
+cmd=<request><global-protect-client><software><download><version>6.3.3-c1016</version></download></software></global-protect-client></request>
+
+# Activate a downloaded version — returns job ID; poll until FIN
+cmd=<request><global-protect-client><software><activate><version>6.3.3-c1016</version></activate></software></global-protect-client></request>
+
+# List versions and download/active status
+cmd=<request><global-protect-client><software><info/></software></global-protect-client></request>
+```
+
+- Download and activate on both HA peers in parallel — do **not** use `sync-to-peer` (slower than parallel direct downloads)
+- Activate job completes in ~30–60 seconds; poll job status the same way as any other job
+
+### Delete an old GP client version (SSH only)
+
+```bash
+ssh svcclaude@<host> << 'EOF'
+delete global-protect-client version 6.3.3-c915
+exit
+EOF
+```
+
+- No confirmation prompt — the `y` is not needed and will cause "Unknown command: y"
+- Verify with `info` after: `downloaded` should change to `no`
+
+---
+
 ## Software Management
 
 ### Downloads and version listing (API)
