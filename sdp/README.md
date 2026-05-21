@@ -548,6 +548,21 @@ Tested and confirmed invalid (return `4007 Invalid URL`):
 
 ## Scripting Gotchas
 
+### API responses contain literal newlines inside JSON strings — use `strict=False`
+
+The SDP API returns JSON with literal (unescaped) newline characters embedded inside string values (most often in `description` fields). This is technically invalid JSON. Python's `json.loads()` rejects it by default.
+
+**Fix:** always parse SDP responses with `strict=False`:
+
+```python
+import json
+data = json.loads(raw, strict=False)
+```
+
+Attempting to work around it by stripping control bytes or pre-escaping newlines will break valid escape sequences elsewhere in the payload and cause a different parse error.
+
+---
+
 ### Don't call helper scripts as subprocesses inside a heredoc that already has a token
 
 `get-ticket.sh`, `update-ticket.sh`, and similar scripts each source `sdp-api.sh` and call `refresh_token` internally — they do not inherit `$ACCESS_TOKEN` from a parent shell. If you call one of these scripts as a subprocess (`zsh /path/to/get-ticket.sh`) inside a heredoc block that already called `refresh_token`, Zoho sees two rapid refresh calls and rate-limits the second one. The script then proceeds with an empty token, curl returns empty output, and any JSON parsing step fails with `Expecting value: line 1 column 1 (char 0)`.
