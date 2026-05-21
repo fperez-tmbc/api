@@ -80,7 +80,7 @@ echo "Install job ID: ${jobid}"
 poll_job "$jobid" "Install" || exit 1
 
 echo "=== Install complete — rebooting ${HOST} ==="
-ssh "${SSH_OPTS[@]}" "svcclaude@${HOST}" 2>/dev/null << 'REBOOT' || true
+timeout 30 ssh "${SSH_OPTS[@]}" "svcclaude@${HOST}" 2>/dev/null << 'REBOOT' || true
 request restart system
 y
 exit
