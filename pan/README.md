@@ -156,39 +156,50 @@ type=op  cmd=<request><system><software><download><version>11.2.10-h8</version><
 ```
 
 - Always run `check` before verifying downloaded state — the local list can be stale
+- `check` API call can take >60 seconds on PA-220 — use `--max-time 120`
 - Verify with `check` then confirm `<downloaded>yes</downloaded>` for target version
+- After upgrading, software info may show no `[CURRENT]` version until `check` is re-run — this is cosmetic; confirm version via `show system info` instead
 
 ### Install, delete, reboot (SSH only — not exposed via API)
 
-Use key-based SSH with stdin heredoc. Include `y` to answer confirmation prompts; if heredoc `y` gets stuck use `printf`:
+Use key-based SSH with stdin heredoc. On PAN-OS 10.2.x, always add `-o IdentitiesOnly=yes -o IdentityAgent=none -o PubkeyAcceptedAlgorithms=rsa-sha2-256` to avoid "Too many authentication failures" from the agent offering extra keys.
 
 ```bash
-# Key-based (preferred)
-ssh -i ~/.tokens/svcclaude-key -o StrictHostKeyChecking=no -o PasswordAuthentication=no svcclaude@<host> << 'EOF'
-request system software install version 11.2.10-h8
+SSH_OPTS="-i ~/.tokens/svcclaude-key-rsa -o StrictHostKeyChecking=no -o PasswordAuthentication=no \
+  -o IdentitiesOnly=yes -o IdentityAgent=none -o PubkeyAcceptedAlgorithms=rsa-sha2-256 -o ConnectTimeout=30"
+
+# Install
+ssh $SSH_OPTS svcclaude@<host> << 'EOF'
+request system software install version 10.2.18-h6
 y
 exit
 EOF
 
-# Reboot (use printf if heredoc y gets stuck)
-printf 'request restart system\ny\nexit\n' | ssh -i ~/.tokens/svcclaude-key \
-  -o StrictHostKeyChecking=no -o PasswordAuthentication=no svcclaude@<host>
+# Reboot — wrap with timeout 30 so the script doesn't hang when the session drops
+timeout 30 ssh $SSH_OPTS svcclaude@<host> << 'EOF' || true
+request restart system
+y
+exit
+EOF
 ```
 
 - `delete software version <ver>` — removes a downloaded image (SSH only)
 - `request system software install version <ver>` — prompts for `y`; enqueues install job
 - `request system software info` — lists all versions and downloaded status
 - `request restart system` — prompts for `y`; exit code 255 on success (session drops with device)
-- Poll install job: `show jobs id <JOBID>` until `FIN / OK`
+- Poll install job via API: `type=op cmd=<show><jobs><id>JOBID</id></jobs></show>` until `<status>FIN</status>`
+- **Never reboot before the install job reaches FIN** — rebooting mid-install leaves the device on an unrecognized intermediate version (observed: `10.2.18.2-50` after interrupting a 10.2.18-h6 install at 57%)
+- Use **`pan/pan-upgrade.sh`** for automated installs — polls until FIN before rebooting
 
 ### Upgrade order for HA pairs
 
 1. Download on both peers in parallel (API)
-2. Verify downloaded state on both (API check)
-3. Install + reboot passive peer first; wait for it to return to passive HA state before touching active
+2. Run `software check` on both to refresh list if versions aren't showing
+3. Install + reboot passive peer first using `pan-upgrade.sh`; wait for it to return to passive HA state
 4. Install + reboot active peer; brief failover to other peer expected
-5. Confirm both show `FIN / OK` version and HA state synchronized
-6. Delete old version from both (SSH), verify via API check
+5. Confirm both peers show matching version and `build-compat: Match` in HA state
+6. Delete old version from both (SSH), verify via `software check` + info
+- PA-220 reboots take ~20–25 minutes to come back on API after a 5-minute initial wait
 
 ## API Key Certificate Setup
 
