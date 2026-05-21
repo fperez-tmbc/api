@@ -37,19 +37,19 @@ poll_job() {
     resp=$(api --data-urlencode "type=op" \
                --data-urlencode "key=$TOKEN" \
                --data-urlencode "cmd=<show><jobs><id>${jobid}</id></jobs></show>")
-    local status result progress
-    status=$(echo "$resp" | grep -o '<status>[^<]*</status>' | head -1 | sed 's/<[^>]*>//g')
-    result=$(echo "$resp" | grep -o '<result>[^<]*</result>' | head -1 | sed 's/<[^>]*>//g')
-    progress=$(echo "$resp" | grep -o '<progress>[^<]*</progress>' | head -1 | sed 's/<[^>]*>//g')
-    if [[ $status == FIN ]]; then
-      echo "  ${label} FIN — result: ${result}"
-      if [[ $result != OK ]]; then
-        echo "ERROR: ${label} did not complete successfully (result: ${result})" >&2
+    local jstatus jresult jprogress
+    jstatus=$(echo "$resp" | grep -o '<status>[^<]*</status>' | head -1 | sed 's/<[^>]*>//g')
+    jresult=$(echo "$resp" | grep -o '<result>[^<]*</result>' | head -1 | sed 's/<[^>]*>//g')
+    jprogress=$(echo "$resp" | grep -o '<progress>[^<]*</progress>' | head -1 | sed 's/<[^>]*>//g')
+    if [[ $jstatus == FIN ]]; then
+      echo "  ${label} FIN — result: ${jresult}"
+      if [[ $jresult != OK ]]; then
+        echo "ERROR: ${label} did not complete successfully (result: ${jresult})" >&2
         return 1
       fi
       return 0
     fi
-    echo "  ${label}: ${status} ${progress}%"
+    echo "  ${label}: ${jstatus} ${jprogress}%"
     sleep 15
   done
   echo "ERROR: ${label} timed out after 120 minutes" >&2
