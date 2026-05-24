@@ -147,9 +147,32 @@ foreach ($upn in $toProcess) {
 }
 
 # ── Phase 3: Disable archives ────────────────────────────────────────────────
-$completedUpns   = @($completed | ForEach-Object { $_.UPN })
-$remoteMailboxes = @($completedUpns | Where-Object { $upnToType[$_] -eq 'RemoteUserMailbox' })
-$cloudMailboxes  = @($completedUpns | Where-Object { $upnToType[$_] -ne 'RemoteUserMailbox' })
+$completedUpns = @($completed | ForEach-Object { $_.UPN })
+
+# Classify via on-prem Exchange — Get-RemoteMailbox is authoritative for hybrid accounts.
+# EXO's RecipientTypeDetails shows hybrid accounts as UserMailbox, not RemoteUserMailbox.
+Write-Host "`n[Phase 3] Classifying mailboxes via on-prem Exchange..." -ForegroundColor Cyan
+$upnList = ($completedUpns | ForEach-Object { "'$_'" }) -join ','
+$classifyScript = @"
+`$pass = ConvertTo-SecureString '$OnPremPass' -AsPlainText -Force
+`$cred = New-Object System.Management.Automation.PSCredential('CPP-DB\svcclaude', `$pass)
+`$opts = New-PSSessionOption -SkipCACheck -SkipCNCheck -SkipRevocationCheck
+`$s = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri 'https://$ExchServer/PowerShell/' -Credential `$cred -Authentication Basic -SessionOption `$opts
+Import-PSSession `$s -DisableNameChecking | Out-Null
+foreach (`$upn in @($upnList)) {
+    if (Get-RemoteMailbox -Identity `$upn -ErrorAction SilentlyContinue) {
+        Write-Output "HYBRID:`$upn"
+    } else {
+        Write-Output "CLOUD:`$upn"
+    }
+}
+Remove-PSSession `$s
+"@
+$classifyResult  = Invoke-OnPremScript $classifyScript
+$remoteMailboxes = @($classifyResult | Where-Object { $_ -match '^HYBRID:' } | ForEach-Object { ($_ -split ':',2)[1].Trim() })
+$cloudMailboxes  = @($classifyResult | Where-Object { $_ -match '^CLOUD:'  } | ForEach-Object { ($_ -split ':',2)[1].Trim() })
+foreach ($upn in $remoteMailboxes) { Write-Host "  Hybrid (on-prem): $upn" }
+foreach ($upn in $cloudMailboxes)  { Write-Host "  Cloud-only (EXO): $upn" }
 
 Write-Host "`n[Phase 3] Disabling archives for $($completedUpns.Count) user(s)..." -ForegroundColor Cyan
 
