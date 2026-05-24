@@ -169,8 +169,8 @@ foreach (`$upn in @($upnList)) {
 Remove-PSSession `$s
 "@
 $classifyResult  = Invoke-OnPremScript $classifyScript
-$remoteMailboxes = @($classifyResult | Where-Object { $_ -match '^HYBRID:' } | ForEach-Object { ($_ -split ':',2)[1].Trim() })
-$cloudMailboxes  = @($classifyResult | Where-Object { $_ -match '^CLOUD:'  } | ForEach-Object { ($_ -split ':',2)[1].Trim() })
+$remoteMailboxes = @($classifyResult | Where-Object { $_ -match '^HYBRID:' } | ForEach-Object { ($_ -split ':',2)[1].Trim() } | Select-Object -Unique)
+$cloudMailboxes  = @($classifyResult | Where-Object { $_ -match '^CLOUD:'  } | ForEach-Object { ($_ -split ':',2)[1].Trim() } | Select-Object -Unique)
 foreach ($upn in $remoteMailboxes) { Write-Host "  Hybrid (on-prem): $upn" }
 foreach ($upn in $cloudMailboxes)  { Write-Host "  Cloud-only (EXO): $upn" }
 
