@@ -76,8 +76,51 @@ WHERE col.Name = 'PROD' AND c.NeedsReboot = 1
 
 | Table | Key columns |
 |---|---|
-| `Deployments` | `DeploymentId`, `Status` (`Running`/`Finished`), `Started`, `Finished` |
-| `DeploymentComputers` | `DeploymentId`, `Name`, `Status` (`Running`/`Successful`/`Failed`), `Error` |
+| `Deployments` | `DeploymentId`, `Status` (`Running`/`Finished`), `Started` |
+| `DeploymentComputers` | `DeploymentId`, `Name`, `Status` (`Running`/`Successful`/`Failed`), `Error`, `DeploymentComputerId` |
+| `DeploymentComputerSteps` | `DeploymentComputerId`, `Title`, `ReturnCode`, `OutputFile`, `Error`, `IsFailed` |
+
+**Note:** `DeploymentComputers` does NOT have a `Finished` column — use `Deployments.Started` as the scan reference timestamp.
+
+### Reading per-machine WU output logs
+
+Each step's output is stored as a gzip file. The filename is in `DeploymentComputerSteps.OutputFile`; the full path is:
+
+```
+C:\ProgramData\Admin Arsenal\PDQ Deploy\Deployment Output\<OutputFile>
+```
+
+Decompress via PowerShell using `FileStream` (not `MemoryStream` — the byte array overload fails on large files):
+
+```powershell
+$ProgressPreference = 'SilentlyContinue'
+$in  = New-Object System.IO.FileStream('C:\ProgramData\...\file.gz', [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read)
+$gz  = New-Object System.IO.Compression.GZipStream($in, [System.IO.Compression.CompressionMode]::Decompress)
+$sr  = New-Object System.IO.StreamReader($gz)
+$sr.ReadToEnd()
+$sr.Close(); $gz.Close(); $in.Close()
+```
+
+**Output format** — each installed update appears as:
+
+```
+3 MACHINENAME  Installed  KB5040442  500MB 2024-10 Cumulative Update for Windows 11 ...
+```
+
+### Detecting Cumulative Updates to set reboot wait time
+
+After a WU deployment, read the output logs for all machines and check for `Installed` lines containing `"Cumulative Update"`. Use this to decide the post-reboot wait:
+
+- **Any machine installed a CU → wait 20 minutes**
+- **No CUs installed → wait 5 minutes**
+
+Query to get all output file names for a deployment:
+```sql
+SELECT dc.Name, dcs.OutputFile
+FROM DeploymentComputerSteps dcs
+JOIN DeploymentComputers dc ON dcs.DeploymentComputerId = dc.DeploymentComputerId
+WHERE dc.DeploymentId = <id>
+```
 
 ---
 
