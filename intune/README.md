@@ -16,6 +16,18 @@ igraph /deviceManagement/managedDevices
 **Note:** `igraph` targets `v1.0`. Intune device management scripts live on the `beta`
 endpoint — pass the full URL override if needed, or edit the `GRAPH` constant temporarily.
 
+**Do NOT pass `/beta/...` as the path to `igraph`.** The script strips the leading slash
+then prepends `https://graph.microsoft.com/v1.0/`, producing a malformed URL like
+`v1.0/beta/deviceManagement/...` which returns `BadRequest: Resource not found for the
+segment 'beta'`. For beta endpoints, use an inline Python snippet that reuses `igraph`'s
+`get_token()` auth but sets its own base URL:
+
+```python
+BETA = "https://graph.microsoft.com/beta"
+# ... get_token() from igraph, then:
+r = requests.get(f"{BETA}/deviceManagement/deviceManagementScripts", headers=headers)
+```
+
 ### App registration: `claude-exo`
 
 - **App ID:** `69de0375-242d-4b8a-94df-4e095ab81cea`
@@ -26,6 +38,7 @@ endpoint — pass the full URL override if needed, or edit the `GRAPH` constant 
   - `DeviceManagementConfiguration.ReadWrite.All`
   - `AuditLog.Read.All`
   - `DeviceManagementScripts.ReadWrite.All`
+  - `DeviceManagementManagedDevices.Read.All`
 
 If a task requires a permission not listed above, **add it to this app** rather than
 creating a temporary app registration. See "Adding permissions" below.
