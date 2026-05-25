@@ -25,6 +25,7 @@ endpoint — pass the full URL override if needed, or edit the `GRAPH` constant 
   - `Mail.ReadWrite`
   - `DeviceManagementConfiguration.ReadWrite.All`
   - `AuditLog.Read.All`
+  - `DeviceManagementScripts.ReadWrite.All`
 
 If a task requires a permission not listed above, **add it to this app** rather than
 creating a temporary app registration. See "Adding permissions" below.
