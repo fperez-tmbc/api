@@ -82,7 +82,7 @@ WHERE col.Name = 'PROD' AND c.NeedsReboot = 1
 
 **Note:** `DeploymentComputers` does NOT have a `Finished` column.
 
-**Do NOT poll for post-deployment scans.** PDQ Inventory scans each machine individually as soon as its deployment step completes — not when the overall deployment finishes. By the time `Deployments.Status = 'Finished'`, all machines are already rescanned. Their `SuccessfulScanDate` will fall between `Deployments.Started` and `Deployments.Finished`, so comparing against `Finished` falsely shows all machines as "not yet scanned." Query `NeedsReboot` immediately after the deployment is `Finished`.
+**Post-deployment scan check** — after deployment is `Finished`, immediately query how many collection members have `SuccessfulScanDate < Deployments.Started`. Use `Started` (not `Finished`) as the reference because PDQ scans each machine as soon as its step completes, so scan timestamps fall inside the deployment window. If the count is already 0, proceed immediately. If machines are still pending, poll every 30 s until the count reaches 0 — do not assume scans are done or not done without checking first.
 
 ### Reading per-machine WU output logs
 
