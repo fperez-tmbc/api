@@ -106,6 +106,20 @@ done
 /Users/fperez2nd/bin/gam7/gam user <user@aionetworking.com> show profile
 ```
 
+## Updating GAM
+
+**Never run the GAM update installer in a background Claude Code task.** The installer
+is interactive — it prompts "Please answer yes or no" for alias/profile updates and will
+loop forever if there is no TTY, filling disk. This caused a 787 GB runaway file in May 2026.
+
+To update GAM, run it directly in a terminal:
+```bash
+bash <(curl -s -S -L https://gam-shortn.appspot.com/gam-install)
+```
+
+If a non-interactive update is ever needed, set `ANSWER_YES=1` and `NONINTERACTIVE=1`
+before running the installer, and verify the installer honors those flags first.
+
 ## Notes
 
 - **Google Photos**: Photos Library API does not support service accounts or DWD — manual
