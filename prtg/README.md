@@ -11,13 +11,20 @@
 
 ## Auth
 
-Uses a PRTG API token (generated under My Account → API Keys). Pass as:
+API token generated under My Account → API Keys. Three ways to pass it:
 
-```
+```bash
+# Query param (simple)
 ?apitoken=<TOKEN>
+
+# Bearer header (preferred — keeps token out of URLs/logs)
+-H "Authorization: Bearer <TOKEN>"
+
+# Username + passhash (legacy)
+?username=<user>&passhash=<hash>
 ```
 
-The token file contains the raw token string (no JSON wrapper). No separate service account is needed — the API token alone provides full access.
+No separate service account needed — the API token alone provides full access.
 
 ## Common curl Pattern
 
@@ -25,8 +32,23 @@ The token file contains the raw token string (no JSON wrapper). No separate serv
 TOKEN=$(tr -d '[:space:]' < ~/GitHub/.tokens/prtg)
 BASE="https://prtg.themyersbriggs.com/api"
 
+# Read (query param)
 curl -sk "${BASE}/table.json?content=sensors&output=json&apitoken=${TOKEN}"
+
+# Action (Bearer header, checks HTTP status)
+curl -sk -o /dev/null -w "%{http_code}" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  "${BASE}/acknowledgealarm.htm?id=<id>&ackmsg=<msg>"
 ```
+
+## HTTP Response Codes (action endpoints)
+
+| Code | Meaning |
+|------|---------|
+| 200 | Success — data returned |
+| 302 | Success — action performed (acknowledge, pause, etc.) |
+| 400 | Bad request — check parameters |
+| 401 | Unauthorized — bad token |
 
 ## API Endpoints
 
@@ -34,44 +56,63 @@ curl -sk "${BASE}/table.json?content=sensors&output=json&apitoken=${TOKEN}"
 
 | Endpoint | Purpose | Key params |
 |----------|---------|-----------|
-| `/api/table.json` | List objects (sensors, devices, groups, channels) | `content=sensors\|devices\|groups`, `columns=...` |
-| `/api/getsensordetails.json` | Sensor detail + channels | `id=<sensorid>` |
-| `/api/getobjectstatus.htm` | Object status (running, paused, etc.) | `id=<objid>` |
+| `/api/table.json` | List objects | `content=sensors\|devices\|groups\|channels`, `columns=...`, `count=`, `filter_status=` |
+| `/api/getsensordetails.json` | Full sensor detail + channels | `id=<sensorid>` |
+| `/api/getobjectstatus.htm` | Object status | `id=<objid>` |
 | `/api/getstatus.htm` | Probe/system status | — |
-| `/api/historicdata.json` | Historical data for a channel | `id=<sensorid>`, `avg=0\|300\|3600`, `sdate`, `edate` |
+| `/api/historicdata.json` | Channel history | `id=<sensorid>`, `avg=0\|300\|3600`, `sdate=YYYY-MM-DD-HH-MM-SS`, `edate=...` |
 
-### Actions
+### Monitoring Control
 
 | Endpoint | Purpose | Key params |
 |----------|---------|-----------|
-| `/api/acknowledgealarm.htm` | Acknowledge an alert | `id=<sensorid>`, `ackmsg=<msg>` — returns 302 on success |
-| `/api/pause.htm` | Pause a sensor/device/group | `id=<objid>`, `action=0` (pause), `action=1` (resume) |
-| `/api/pauseobjectfor.htm` | Pause for N minutes | `id=<objid>`, `pausemsg=<msg>`, `duration=<minutes>` |
-| `/api/resume.htm` | Resume paused sensor | `id=<objid>` |
-| `/api/simulate.htm` | Simulate error on sensor (testing) | `id=<sensorid>` |
-| `/api/setobjectproperty.htm` | Set a property on any object | `id=<objid>`, `name=<prop>`, `value=<val>` |
-| `/api/adddevice2.htm` | Add a device | `name`, `host`, `groupid` |
+| `/api/acknowledgealarm.htm` | Acknowledge a Down alert | `id=<sensorid>`, `ackmsg=<msg>` |
+| `/api/pause.htm` | Pause or resume | `id=<objid>`, `action=0` (pause indefinitely), `action=1` (resume), `pausemsg=<msg>` |
+| `/api/pauseobjectfor.htm` | Pause for N minutes (auto-resumes) | `id=<objid>`, `duration=<minutes>`, `pausemsg=<msg>` |
+| `/api/scannow.htm` | Force immediate scan | `id=<objid>` |
+| `/api/simulate.htm` | Simulate sensor error | `id=<sensorid>`, `action=1` — only works on Up/Warning/Unusual/Unknown sensors |
+| `/api/discovernow.htm` | Force auto-discovery | `id=<groupid\|deviceid>`, `template=<filename>` (optional) |
 
-### Search / Lookup Examples
+### Object Management
+
+| Endpoint | Purpose | Key params |
+|----------|---------|-----------|
+| `/api/setobjectproperty.htm` | Set any string/numeric property | `id=<objid>`, `name=<prop>`, `value=<val>`; for channels add `subtype=channel`, `subid=<channelid>` |
+| `/api/rename.htm` | Rename an object | `id=<objid>`, `value=<newname>` |
+| `/api/setpriority.htm` | Set priority | `id=<objid>`, `prio=1-5` |
+| `/api/setposition.htm` | Reorder in tree | `id=<objid>`, `newpos=up\|down\|top\|bottom` |
+| `/api/duplicateobject.htm` | Clone an object | `id=<objid>`, `name=<newname>`, `targetid=<parentid>`; devices also need `host=<ip>` — cloned objects start Paused, must resume |
+| `/api/deleteobject.htm` | Permanently delete | `id=<objid>`, `approve=1` — irreversible, deletes all subobjects |
+| `/api/adddevice2.htm` | Add a device | `name=`, `host=`, `groupid=` |
+| `/api/setlonlat.htm` | Set geo location | `id=<objid>`, `location=<name>` or `lonlat=<lon,lat>` |
+
+### Notifications & Reports
+
+| Endpoint | Purpose | Key params |
+|----------|---------|-----------|
+| `/api/notificationtest.htm` | Trigger test notification | `id=<notification_template_id>` |
+| `/api/reportaddsensor.htm` | Add object to report | `id=<reportid>`, `addid=<objid>` |
+
+## Listing / Filter Examples
 
 ```bash
 TOKEN=$(tr -d '[:space:]' < ~/GitHub/.tokens/prtg)
 BASE="https://prtg.themyersbriggs.com/api"
 
-# List all sensors with status
-curl -sk "${BASE}/table.json?content=sensors&output=json&columns=objid,name,device,status,message,lastvalue&apitoken=${TOKEN}" | python3 -m json.tool
+# All down sensors (status 5)
+curl -sk "${BASE}/table.json?content=sensors&output=json&filter_status=5&columns=objid,name,device,message&count=2500&apitoken=${TOKEN}" | python3 -m json.tool
 
-# Find sensors by name (substring match)
-curl -sk "${BASE}/table.json?content=sensors&output=json&filter_name=@sub(<search_term>)&columns=objid,name,device,status&apitoken=${TOKEN}" | python3 -m json.tool
+# Down acknowledged (status 14)
+curl -sk "${BASE}/table.json?content=sensors&output=json&filter_status=14&columns=objid,name,device&count=2500&apitoken=${TOKEN}" | python3 -m json.tool
 
-# List all devices in a group
+# Find by name (substring)
+curl -sk "${BASE}/table.json?content=sensors&output=json&filter_name=@sub(<term>)&columns=objid,name,device,status&apitoken=${TOKEN}" | python3 -m json.tool
+
+# Devices in a group
 curl -sk "${BASE}/table.json?content=devices&output=json&id=<groupid>&columns=objid,name,host,status&apitoken=${TOKEN}" | python3 -m json.tool
-
-# Get specific sensor details
-curl -sk "${BASE}/getsensordetails.json?id=<sensorid>&apitoken=${TOKEN}" | python3 -m json.tool
 ```
 
-## Status Codes
+## Sensor Status Codes (filter_status values)
 
 | Code | Meaning |
 |------|---------|
@@ -89,20 +130,17 @@ curl -sk "${BASE}/getsensordetails.json?id=<sensorid>&apitoken=${TOKEN}" | pytho
 | 12 | Paused Until |
 | 14 | Down Acknowledged |
 
-## Object ID Notes
-
-- All PRTG objects (groups, devices, probes, sensors) have a numeric `objid`
-- The root group is typically `0`
-- To find an object's ID: navigate to it in the UI → the URL contains `id=<number>`
-- Devices and sensors share the same ID namespace
-
 ## Columns for table.json
-
-Common useful column sets:
 
 - **Sensors:** `objid,name,device,group,status,message,lastvalue,lastcheck`
 - **Devices:** `objid,name,host,group,status,message`
 - **Groups:** `objid,name,totalsens,downsens,warnsens,pausedsens`
+
+## Object ID Notes
+
+- All PRTG objects share a single numeric `objid` namespace
+- Root group is `0`
+- To find an ID: open the object in the UI — the URL contains `id=<number>`
 
 ## Administration
 
@@ -110,21 +148,25 @@ Common useful column sets:
 
 PRTG does not support adding individual AD users — access is group-based:
 
-1. **Setup → System Administration → Core & Probes** — confirm your AD domain is set in the Active Directory Integration section.
+1. **Setup → System Administration → Core & Probes** — confirm your AD domain is set.
 2. **Setup → User Groups → Add User Group:**
    - Set **Active Directory or Single Sign-On Integration** to "Use Active Directory integration"
    - Select the AD group from the dropdown
    - Set User Type (Read/write or Read-only)
    - Click Create
-3. Users in that AD group log into PRTG with their Windows credentials — PRTG creates their local account automatically on first login.
+3. Users log in with Windows credentials — PRTG creates their local account automatically on first login.
 
 ## Gotchas
 
-- Auth uses `apitoken=` parameter (not `username=`/`passhash=`)
-- No service account needed — API token alone provides full access
-- JSON responses are at `.json` endpoints; XML at `.xml` or `.htm` — prefer JSON
-- `filter_name=@sub(text)` does substring match; `filter_name=exact` is exact match
-- `action=0` on `/api/pause.htm` pauses; `action=1` resumes — counterintuitive
-- Large table responses may need `count=2500` to avoid truncation (default is 500)
-- HTTPS uses self-signed cert — always use `curl -sk`
-- `getstatus.htm` returns `(Object not found)` for some fields with API token auth — this is a quirk of that endpoint, not a permissions issue; `table.json` works fine
+- Action endpoints return **302** on success (not 200) — use `-w "%{http_code}"` to verify
+- `acknowledge.htm` does NOT exist — the correct endpoint is `acknowledgealarm.htm`
+- `action=0` on `pause.htm` pauses; `action=1` resumes — counterintuitive
+- `simulate.htm` requires `action=1` and only works on Up/Warning/Unusual/Unknown sensors
+- `duplicateobject.htm` always creates clones in Paused state — must call `pause.htm?action=1` after
+- `deleteobject.htm` requires `approve=1` and is irreversible
+- `count` defaults to 500 — use `count=2500` for large environments
+- `filter_name=@sub(text)` does substring match; omit `@sub()` for exact match
+- `getstatus.htm` returns `(Object not found)` for some fields with API token auth — use `table.json` instead
+- HTTPS uses self-signed cert — always `curl -sk`
+- Rate limit on historic data: 5 requests/minute
+- Raw sensor data retained for up to 40 days; historic reports limited to 500-day range
