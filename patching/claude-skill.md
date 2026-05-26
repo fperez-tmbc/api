@@ -38,6 +38,7 @@ curl -sk -u "admin:${F5_PASS}" -X PATCH \
 - Pipe all SSH output through `| tr -d '\r'` — Windows CR characters break string comparisons
 - Use `COUNT(DISTINCT c.ComputerId)` in scan freshness query — machines in multiple sub-collections cause double-counting without DISTINCT
 - Use `||` for SQLite string concatenation in the CU check PowerShell query — NOT `+`. SQLite's `+` does numeric addition and coerces strings to 0, so all rows return `0` and no output files are ever found.
+- Scan/reboot queries cannot JOIN across the Deploy and Inventory SQLite databases. Fetch the machine list from DEPLOY_DB (`SELECT Name FROM DeploymentComputers WHERE DeploymentId = $DEPLOY_ID`) then build an IN clause for INV_DB queries.
 - Always include `-o ConnectTimeout=15` on SSH calls to prevent silent hangs
 - Use `if [[ "$VAR" == "value" ]]; then break; fi` — NOT `[[ ]] && break` (unreliable in zsh loops)
 - Use epoch-based waits: `TARGET_EPOCH=$(( $(date '+%s') + MIN * 60 ))` + `until [[ $(date '+%s') -ge $TARGET_EPOCH ]]; do sleep 10; done`
@@ -106,14 +107,18 @@ while true; do
 
     pdq_ssh "$PDQ_SQLITE \"$PDQ_DEPLOY_DB\" \"SELECT Name, Status, COALESCE(Error,'') FROM DeploymentComputers WHERE DeploymentId = $DEPLOY_ID ORDER BY Name\""
 
+    # Get machine names for this deployment (DEPLOY_DB); use IN clause for INV_DB queries
+    CYCLE_MACHINES=("${(@f)$(pdq_ssh "$PDQ_SQLITE \"$PDQ_DEPLOY_DB\" \"SELECT Name FROM DeploymentComputers WHERE DeploymentId = $DEPLOY_ID ORDER BY Name\"")}")
+    CYCLE_IN=$(printf "'%s'," "${CYCLE_MACHINES[@]}"); CYCLE_IN="${CYCLE_IN%,}"
+
     for i in $(seq 1 30); do
-        PENDING_SCANS=$(pdq_ssh "$PDQ_SQLITE \"$PDQ_INV_DB\" \"SELECT COUNT(DISTINCT c.ComputerId) FROM Computers c JOIN CollectionComputers cc ON c.ComputerId = cc.ComputerId JOIN Collections col ON cc.CollectionId = col.CollectionId WHERE col.Name = '$COLLECTION' AND (c.SuccessfulScanDate IS NULL OR c.SuccessfulScanDate < '$STARTED')\"")
+        PENDING_SCANS=$(pdq_ssh "$PDQ_SQLITE \"$PDQ_INV_DB\" \"SELECT COUNT(DISTINCT ComputerId) FROM Computers WHERE Name IN ($CYCLE_IN) AND (SuccessfulScanDate IS NULL OR SuccessfulScanDate < '$STARTED')\"")
         log "Machines not yet rescanned: $PENDING_SCANS"
         if [[ "$PENDING_SCANS" == "0" ]]; then break; fi
         sleep 30
     done
 
-    REBOOT_MACHINES=("${(@f)$(pdq_ssh "$PDQ_SQLITE \"$PDQ_INV_DB\" \"SELECT DISTINCT c.Name FROM Computers c JOIN CollectionComputers cc ON c.ComputerId = cc.ComputerId JOIN Collections col ON cc.CollectionId = col.CollectionId WHERE col.Name = '$COLLECTION' AND c.NeedsReboot = 1 ORDER BY c.Name\"")}")
+    REBOOT_MACHINES=("${(@f)$(pdq_ssh "$PDQ_SQLITE \"$PDQ_INV_DB\" \"SELECT DISTINCT Name FROM Computers WHERE Name IN ($CYCLE_IN) AND NeedsReboot = 1 ORDER BY Name\"")}")
     REBOOT_LIST="${REBOOT_MACHINES[*]}"
     log "Pending reboots: ${REBOOT_LIST:-none}"
 
