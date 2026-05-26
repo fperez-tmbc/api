@@ -17,11 +17,7 @@ Uses a PRTG API token (generated under My Account → API Keys). Pass as:
 ?apitoken=<TOKEN>
 ```
 
-The token file contains the raw token string (no JSON wrapper):
-
-```
-<PRTG_API_TOKEN>
-```
+The token file contains the raw token string (no JSON wrapper). No separate service account is needed — the API token alone provides full access.
 
 ## Common curl Pattern
 
@@ -110,26 +106,25 @@ Common useful column sets:
 
 ## Administration
 
-### Add AD user to PRTG (UI)
+### Add AD users to PRTG (UI)
 
-**Setup (gear icon) → User Accounts → Add User**
+PRTG does not support adding individual AD users — access is group-based:
 
-1. Login Name: AD username (sAMAccountName, e.g. `jdoe`)
-2. User Type: **Active Directory User**
-3. Domain: `themyersbriggs.com` (or `cpp-db`)
-4. Primary Group: assign appropriate PRTG group
-5. Save — user authenticates with their domain password; no PRTG password is set
-
-### Add AD group to PRTG (UI)
-
-**Setup → User Groups → Add Group** → set type to Active Directory, enter group name.
+1. **Setup → System Administration → Core & Probes** — confirm your AD domain is set in the Active Directory Integration section.
+2. **Setup → User Groups → Add User Group:**
+   - Set **Active Directory or Single Sign-On Integration** to "Use Active Directory integration"
+   - Select the AD group from the dropdown
+   - Set User Type (Read/write or Read-only)
+   - Click Create
+3. Users in that AD group log into PRTG with their Windows credentials — PRTG creates their local account automatically on first login.
 
 ## Gotchas
 
 - Auth uses `apitoken=` parameter (not `username=`/`passhash=`)
+- No service account needed — API token alone provides full access
 - JSON responses are at `.json` endpoints; XML at `.xml` or `.htm` — prefer JSON
 - `filter_name=@sub(text)` does substring match; `filter_name=exact` is exact match
 - `action=0` on `/api/pause.htm` pauses; `action=1` resumes — counterintuitive
 - Large table responses may need `count=2500` to avoid truncation (default is 500)
 - HTTPS uses self-signed cert — always use `curl -sk`
-- New API accounts may show `(Object not found)` for sensor counts until group permissions are scoped
+- `getstatus.htm` returns `(Object not found)` for some fields with API token auth — this is a quirk of that endpoint, not a permissions issue; `table.json` works fine
