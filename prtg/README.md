@@ -44,7 +44,7 @@ curl -sk "${BASE}/table.json?content=sensors&output=json&apitoken=${TOKEN}"
 
 | Endpoint | Purpose | Key params |
 |----------|---------|-----------|
-| `/api/acknowledge.htm` | Acknowledge an alert | `id=<sensorid>`, `ackmsg=<msg>` |
+| `/api/acknowledgealarm.htm` | Acknowledge an alert | `id=<sensorid>`, `ackmsg=<msg>` — returns 302 on success |
 | `/api/pause.htm` | Pause a sensor/device/group | `id=<objid>`, `action=0` (pause), `action=1` (resume) |
 | `/api/pauseobjectfor.htm` | Pause for N minutes | `id=<objid>`, `pausemsg=<msg>`, `duration=<minutes>` |
 | `/api/resume.htm` | Resume paused sensor | `id=<objid>` |
