@@ -29,10 +29,12 @@
 
 set -o pipefail
 
-# Resolve the path to .sdp-creds relative to this file's location.
+# .sdp-creds lives in the task-tracker repo root (~/GitHub/task-tracker/.sdp-creds).
+# Callers should set SDP_CREDS_FILE before sourcing this script. The fallback below
+# is used when running scripts directly from api/sdp/.
 _SDP_API_DIR="${0:A:h}"
 [ -z "$_SDP_API_DIR" ] && _SDP_API_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-SDP_CREDS_FILE="${SDP_CREDS_FILE:-$_SDP_API_DIR/../../.sdp-creds}"
+SDP_CREDS_FILE="${SDP_CREDS_FILE:-$HOME/GitHub/task-tracker/.sdp-creds}"
 
 load_creds() {
   if [ ! -f "$SDP_CREDS_FILE" ]; then
