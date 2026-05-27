@@ -138,6 +138,49 @@ Some commands require a TTY (sudo, less, vim, etc.):
 ssh -t user@host "sudo command"
 ```
 
+### Windows: authorized_keys location for admin accounts
+
+Standard users store authorized keys in `C:\Users\<username>\.ssh\authorized_keys`.
+Admin accounts use a **different location**: `C:\ProgramData\ssh\administrators_authorized_keys`.
+
+`ssh-copy-id` writes to the user's home directory and won't work for admin accounts. Append the key manually:
+```cmd
+echo <public-key-content> >> C:\ProgramData\ssh\administrators_authorized_keys
+```
+
+Use `type` not `cat` for file operations on Windows.
+
+### Windows: UPN format for domain accounts
+
+Use UPN format (`user@domain`) as the SSH username for domain accounts:
+```bash
+ssh -i ~/.ssh/id_ed25519 "2fperez@themyersbriggs.com"@server.cpp-db.com
+```
+
+### Windows: Firewall profile gotcha
+
+SSH (and WinRM) inbound rules created by Windows default to `Profile=Private`. If the target connects via GlobalProtect VPN, its PANGP adapter is classified as `DomainAuthenticated` — traffic arrives on a Domain-profile interface and is silently dropped even though sshd is listening on `0.0.0.0`.
+
+**Symptoms:** SSH times out, `bytes_received=0` in firewall logs, sshd listening correctly, no explicit deny rule.
+
+**Fix:**
+```cmd
+netsh advfirewall firewall set rule name="OpenSSH SSH Server (sshd)" new profile=domain,private
+```
+
+Proper fix: ensure the GPO pushing the SSH rule defines `Profile=Domain|Profile=Private`. See `knowledge-base/troubleshoot/fraudreyl02-ssh-gpo-2026-05-27.md` for the full case.
+
+### Windows: Exchange Management Shell via SSH
+
+Exchange cmdlets (`Get-MessageTrackingLog`, etc.) require Kerberos credential delegation, which non-interactive SSH sessions don't provide. Workaround: parse the Exchange log CSV files directly instead.
+
+Exchange message tracking logs:
+```
+C:\Program Files\Microsoft\Exchange Server\V15\TransportRoles\Logs\MessageTracking\MSGTRK*.LOG
+```
+
+Log files have `#` comment lines — skip them with `Where-Object { $_ -notmatch '^#' }` before piping to `ConvertFrom-Csv`.
+
 ### PowerShell via SSH (Windows hosts)
 **Always use `-EncodedCommand`, never pipe a script via stdin.**
 
