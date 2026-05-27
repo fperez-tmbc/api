@@ -56,9 +56,41 @@ Use this pattern any time you see:
 
 ---
 
+## End User Laptops
+
+End user endpoints are **not directly routable** from Frank's GlobalProtect connection. The pattern is:
+1. SSH into SVPDQHQ01 (10.70.16.209) — jump onto the internal network
+2. From SVPDQHQ01, use `Invoke-Command` over WinRM to reach the endpoint
+
+**svcclaude does not have standing local admin on endpoints.** Before running any commands, provide Frank with the `net` command to add svcclaude, and wait for confirmation that it's been added:
+
+```
+net localgroup administrators CPP-DB\svcclaude /add
+```
+
+After the session, Frank removes it:
+```
+net localgroup administrators CPP-DB\svcclaude /delete
+```
+
+### Pattern — SSH to SVPDQHQ01, then Invoke-Command to endpoint
+
+```bash
+PASS=$(grep '^PASSWORD=' ~/GitHub/.tokens/svcclaude | cut -d'=' -f2-)
+
+sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no svcclaude@svpdqhq01.cpp-db.com \
+  "powershell -Command \"Invoke-Command -ComputerName TARGET -Credential (New-Object PSCredential('CPP-DB\svcclaude', (ConvertTo-SecureString '$PASS' -AsPlainText -Force))) -ScriptBlock { COMMAND }\""
+```
+
+For multi-line or complex scripts, use `-EncodedCommand` for the outer PowerShell call (see PowerShell via SSH section below) and embed the `Invoke-Command` block inside.
+
+**Note:** `Enter-PSSession` is interactive — Frank drives those manually. Use `Invoke-Command` for anything I'm running.
+
+---
+
 ## Jump Hosts / ProxyJump
 
-SVPDQHQ01 is the primary jump box for Windows hosts that don't have direct SSH.
+SVPDQHQ01 (10.70.16.209) is the primary jump box for servers and other hosts reachable via SSH on the internal network.
 
 ```bash
 # Single hop via jump host
@@ -126,7 +158,7 @@ sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no svcclaude@TARGET \
 
 | Host | Address | User | Auth | Notes |
 |------|---------|------|------|-------|
-| svpdqhq01.cpp-db.com | — | svcclaude | key (`svcclaude-key`) | Primary jump box for Windows hosts |
+| svpdqhq01.cpp-db.com | 10.70.16.209 | svcclaude | sshpass | Primary jump box; also PDQ server; use for Invoke-Command to endpoints |
 | svazadsyncdc01.cpp-db.com | — | svcclaude | sshpass | ADSyncOperators group; use for `Start-ADSyncSyncCycle` |
 | sql-badc01 | 10.70.16.191 | 2fperez@themyersbriggs.com | key | SQL Server 2016; `ssh sql-badc01 -l 2fperez@themyersbriggs.com` |
 | svolprodtx01.cpp-db.com | 10.70.16.28 | root | `id_rsa_svolprodtx01` + legacy algo flags | Oracle/Postfix relay server |
