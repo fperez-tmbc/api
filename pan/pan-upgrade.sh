@@ -20,8 +20,11 @@ BASE_URL="https://${HOST}/api/"
 
 SSH_OPTS=(-i "$SSH_KEY" -o StrictHostKeyChecking=no -o PasswordAuthentication=no
           -o IdentitiesOnly=yes -o IdentityAgent=none
-          -o PubkeyAcceptedAlgorithms=rsa-sha2-256
           -o ConnectTimeout=30)
+# PAN-OS 10.2.x rejects ed25519 and causes "Too many auth failures" without this restriction
+if grep -q 'RSA' "$SSH_KEY" 2>/dev/null; then
+  SSH_OPTS+=(-o PubkeyAcceptedAlgorithms=rsa-sha2-256)
+fi
 
 api() {
   curl -sk --max-time 30 "$BASE_URL" "$@"
