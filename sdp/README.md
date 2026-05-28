@@ -152,6 +152,10 @@ Read the `id` field from `requests[0].id` in the response.
 
 Category/subcategory values must match what's configured in the portal. Use `GET /categories` to list valid values (see Metadata Lookups section below).
 
+#### Update ticket — category and subcategory required
+
+`PUT /requests/{id}` returns `4012` if `category` or `subcategory` is missing, even for partial updates (e.g. setting resolution, technician, or status). Always include both in any PUT to `/requests/{id}`. This does **not** apply to notes (`POST /requests/{id}/notes`) or replies (`POST /requests/{id}/reply`).
+
 #### Close ticket payload
 
 ```json
