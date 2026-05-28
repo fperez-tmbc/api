@@ -231,13 +231,13 @@ EOF
 - `request restart system` — prompts for `y`; exit code 255 on success (session drops with device)
 - Poll install job via API: `type=op cmd=<show><jobs><id>JOBID</id></jobs></show>` until `<status>FIN</status>`
 - **Never reboot before the install job reaches FIN** — rebooting mid-install leaves the device on an unrecognized intermediate version (observed: `10.2.18.2-50` after interrupting a 10.2.18-h6 install at 57%)
-- Use **`pan/pan-upgrade.sh`** for automated installs — polls until FIN before rebooting
+- Use **`task-tracker/projects/pan-patching/pan-upgrade.sh`** for automated installs — polls until FIN before rebooting
 
 ### Upgrade order for HA pairs
 
 1. Download on both peers in parallel (API)
 2. Run `software check` on both to refresh list if versions aren't showing
-3. Install + reboot passive peer first using `pan-upgrade.sh`; wait for it to return to passive HA state
+3. Install + reboot passive peer first using `task-tracker/projects/pan-patching/pan-upgrade.sh`; wait for it to return to passive HA state
 4. Install + reboot active peer; brief failover to other peer expected
 5. Confirm both peers show matching version and `build-compat: Match` in HA state
 6. Delete old version from both (SSH), verify via `software check` + info
