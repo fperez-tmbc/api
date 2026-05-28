@@ -270,6 +270,8 @@ Useful to grab the subject line (which includes the magic `##display_id##` token
 
 Returns `{"response_status": {"status_code": 2000, "status": "success"}}` on success.
 
+**Replies default to private in the portal** even though the email is delivered to the requester. Always include `"show_to_requester": true` in the `notification` payload to mark the reply as public. Field name unverified — confirm via testing and update this note.
+
 ---
 
 ### Conversations
