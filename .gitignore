@@ -1,2 +1,4 @@
 .env
 .cloudflare-creds
+.DS_Store
+__pycache__/
