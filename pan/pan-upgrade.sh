@@ -22,7 +22,7 @@ SSH_OPTS=(-i "$SSH_KEY" -o StrictHostKeyChecking=no -o PasswordAuthentication=no
           -o IdentitiesOnly=yes -o IdentityAgent=none
           -o ConnectTimeout=30)
 # PAN-OS 10.2.x rejects ed25519 and causes "Too many auth failures" without this restriction
-if grep -q 'RSA' "$SSH_KEY" 2>/dev/null; then
+if ssh-keygen -l -f "$SSH_KEY" 2>/dev/null | grep -q '(RSA)'; then
   SSH_OPTS+=(-o PubkeyAcceptedAlgorithms=rsa-sha2-256)
 fi
 
