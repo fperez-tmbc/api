@@ -2,17 +2,19 @@
 
 ## Devices & Tokens
 
-| Device | Role | Base URL | Token file |
-|--------|------|----------|------------|
-| AVSPAN01 | AVS firewall (active) | `https://avspan01.cpp-db.com/api/` | `~/.tokens/pan-avs` |
-| AVSPAN02 | AVS firewall (passive) | `https://avspan02.cpp-db.com/api/` | `~/.tokens/pan-avs` (same — HA pair shares token) |
-| WHPAN01 | WH firewall (active) | `https://whpan01.cpp-db.com/api/` | `~/.tokens/pan-wh` |
-| WHPAN02 | WH firewall (passive) | `https://whpan02.cpp-db.com/api/` | `~/.tokens/pan-wh` (same — HA pair shares token) |
-| AUPAN01 | AU firewall (active) | `https://aupan01.cpp-db.com/api/` | `~/.tokens/pan-au` |
-| AUPAN02 | AU firewall (passive) | `https://aupan02.cpp-db.com/api/` | `~/.tokens/pan-au` (same — HA pair shares token) |
-| FRPAN01 | FR firewall (active) | `https://frpan01.cpp-db.com/api/` | `~/.tokens/pan-fr` |
-| FRPAN02 | FR firewall (passive) | `https://frpan02.cpp-db.com/api/` | `~/.tokens/pan-fr` (same — HA pair shares token) |
-| DCPANORAMA01 | Panorama management | `https://dcpanorama01.cpp-db.com/api/` | `~/.tokens/pan-panorama` |
+| Device | Role | Model | PAN-OS Version | Base URL | Token file |
+|--------|------|-------|----------------|----------|------------|
+| AVSPAN01 | AVS firewall (active) | PA-VM (VM-300) | 11.2.10-h8 | `https://avspan01.cpp-db.com/api/` | `~/.tokens/pan-avs` |
+| AVSPAN02 | AVS firewall (passive) | PA-VM (VM-300) | 11.2.10-h8 | `https://avspan02.cpp-db.com/api/` | `~/.tokens/pan-avs` (same — HA pair shares token) |
+| WHPAN01 | WH firewall (active) | PA-460 | 11.2.10-h8 | `https://whpan01.cpp-db.com/api/` | `~/.tokens/pan-wh` |
+| WHPAN02 | WH firewall (passive) | PA-460 | 11.2.10-h8 | `https://whpan02.cpp-db.com/api/` | `~/.tokens/pan-wh` (same — HA pair shares token) |
+| AUPAN01 | AU firewall (active) | PA-220 | 10.2.18-h6 | `https://aupan01.cpp-db.com/api/` | `~/.tokens/pan-au` |
+| AUPAN02 | AU firewall (passive) | PA-220 | 10.2.18-h6 | `https://aupan02.cpp-db.com/api/` | `~/.tokens/pan-au` (same — HA pair shares token) |
+| FRPAN01 | FR firewall (active) | PA-220 | 10.2.18-h6 | `https://frpan01.cpp-db.com/api/` | `~/.tokens/pan-fr` |
+| FRPAN02 | FR firewall (passive) | PA-220 | 10.2.18-h6 | `https://frpan02.cpp-db.com/api/` | `~/.tokens/pan-fr` (same — HA pair shares token) |
+| DCPANORAMA01 | Panorama management | Panorama (VM) | 11.2.10-h8 | `https://dcpanorama01.cpp-db.com/api/` | `~/.tokens/pan-panorama` |
+
+_Versions last verified: 2026-05-27_
 
 - Token format: `hash:base64url` (certificate-based, PAN-OS 11.x+) or standard base64 (PAN-OS 10.x)
 - AU/FR pairs run PAN-OS 10.2.x — standard token format, no API key cert setup needed
