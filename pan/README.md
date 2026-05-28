@@ -1,5 +1,8 @@
 # PAN-OS XML API Field Notes
 
+> **Patching / upgrade runbooks and scripts** live in the task-tracker project folder:
+> `~/GitHub/task-tracker/projects/pan-patching/`
+
 ## Devices & Tokens
 
 | Device | Role | Model | PAN-OS Version | Base URL | Token file |
