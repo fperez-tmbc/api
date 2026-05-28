@@ -1,13 +1,3 @@
 # API Field Notes
 
-Field notes, auth patterns, and scripts for APIs used at TMBC.
-
-| Folder | API | Notes |
-|--------|-----|-------|
-| [`sdp/`](sdp/) | ServiceDesk Plus Cloud (ManageEngine) | Auth, endpoints, ticket creation, error codes |
-| [`sf/`](sf/) | Salesforce | JWT bearer flow, token acquisition script |
-| [`d365/`](d365/) | Microsoft Dynamics 365 F&O (OData) | Tenant structure, auth, entity discovery, email config, gotchas |
-| [`drata/`](drata/) | Drata | Auth, key endpoints, pagination, gotchas |
-| [`cloudflare/`](cloudflare/) | Cloudflare | DNS management, API tokens |
-| [`knowbe4/`](knowbe4/) | KnowBe4 | Security awareness training API |
-| [`logmein-rescue/`](logmein-rescue/) | LogMeIn Rescue | ASPX-based API, auth options, sessions, reporting, gotchas |
+Working reference for APIs used at TMBC. Each subfolder covers one service and contains auth patterns, key endpoints, known gotchas, and any scripts built against that API.
