@@ -176,5 +176,5 @@ Always include `$ProgressPreference = 'SilentlyContinue'` at the top of the scri
 
 ## Related
 
-- Monthly patching automation: `/Users/fperez2nd/GitHub/patching/`
-- Patching README: `/Users/fperez2nd/GitHub/patching/README.md`
+- Patching skill: `/Users/fperez2nd/.claude/commands/patching.md`
+- Collections config: `/Users/fperez2nd/GitHub/api/patching/collections.md`
