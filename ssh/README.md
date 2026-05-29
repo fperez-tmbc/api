@@ -30,10 +30,14 @@ ssh -o StrictHostKeyChecking=no svcclaude@TARGET "command"
 
 # Step 2 — if "Permission denied (publickey,...)", retry with password
 PASS=$(grep '^PASSWORD=' ~/GitHub/.tokens/svcclaude | cut -d'=' -f2-)
-sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no svcclaude@TARGET "command"
+SSHPASS="$PASS" sshpass -e /c/Windows/System32/OpenSSH/ssh.exe -o StrictHostKeyChecking=no svcclaude@TARGET "command"
 ```
 
 **Why:** svcclaude's password worked on SVAZADSYNCDC01 even when key auth failed. Time was wasted on WinRM workarounds before trying the obvious fallback.
+
+**Windows sshpass gotcha:** The WinGet sshpass binary (`/c/Users/.../WinGet/Links/sshpass`) is Win32-native and cannot hook into Git Bash's POSIX SSH (`/usr/bin/ssh`). Always point it at the Windows OpenSSH binary: `/c/Windows/System32/OpenSSH/ssh.exe`. Use `SSHPASS="$PASS" sshpass -e` (env var) rather than `-p` — more reliable across platforms.
+
+**UPN usernames:** Windows domain hosts often require UPN format (`user@domain`) rather than bare username. Use `-l "svcclaude@cpp-db.com"` — do NOT combine as `user@host` since the `@` in the username confuses SSH host parsing.
 
 ---
 
@@ -202,7 +206,7 @@ sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no svcclaude@TARGET \
 | Host | Address | User | Auth | Notes |
 |------|---------|------|------|-------|
 | svpdqhq01.cpp-db.com | 10.70.16.209 | svcclaude | sshpass | Primary jump box; also PDQ server; use for Invoke-Command to endpoints |
-| svazadsyncdc01.cpp-db.com | — | svcclaude | sshpass | ADSyncOperators group; use for `Start-ADSyncSyncCycle` |
+| svazadsyncdc01.cpp-db.com | — | svcclaude@cpp-db.com (UPN) | sshpass | ADSyncOperators group; use for `Start-ADSyncSyncCycle`; UPN required, use `-l "svcclaude@cpp-db.com"` |
 | sql-badc01 | 10.70.16.191 | 2fperez@themyersbriggs.com | key | SQL Server 2016; `ssh sql-badc01 -l 2fperez@themyersbriggs.com` |
 | svolprodtx01.cpp-db.com | 10.70.16.28 | root | `id_rsa_svolprodtx01` + legacy algo flags | Oracle/Postfix relay server |
 | PAN firewalls (11.x) | see pan README | svcclaude | `svcclaude-key` (ed25519) | avspan01, whpan, aupan (PAN-OS 11+) |
@@ -220,4 +224,6 @@ sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no svcclaude@TARGET \
 | `Host key verification failed` | Host key changed or not in known_hosts | Add `-o StrictHostKeyChecking=no` (internal hosts only) |
 | PowerShell via SSH returns nothing | Stdin pipe to `powershell -` doesn't work | Use `-EncodedCommand` with base64-encoded script |
 | `Connection refused` | SSH not running or wrong port | Check if host needs PsExec access first; see psexec README |
+| sshpass sends password but server still rejects | WinGet sshpass can't hook Git Bash SSH PTY | Use `/c/Windows/System32/OpenSSH/ssh.exe` explicitly; use `SSHPASS=... sshpass -e` |
+| sshpass password rejected on domain account | Bare username rejected; UPN required | Use `-l "user@domain"` not `user@host`; confirmed on svazadsyncdc01 |
 | Sudo prompts for password over SSH | No TTY allocated | Add `-t` flag to allocate a pseudo-TTY |
