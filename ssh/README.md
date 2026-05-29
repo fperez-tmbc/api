@@ -20,6 +20,20 @@ Patterns, gotchas, and lessons learned for SSH access in the TMBC environment.
 
 ---
 
+## Choosing an Auth Method
+
+Before defaulting to sshpass, consider whether a better method is appropriate:
+
+| Method | When to use |
+|--------|-------------|
+| **SSH key auth** | Any host accessed repeatedly — set up once, no PTY issues, works with any SSH binary |
+| **sshpass** | One-off commands on hosts where keys aren't deployed; acceptable for infrequent use |
+| **SSH_ASKPASS** | When sshpass has PTY compatibility problems (e.g. WinGet sshpass + Git Bash) |
+
+**Rule:** If a host will be accessed more than a few times, or sshpass is proving unreliable, prompt Frank to approve setting up key auth before proceeding. Don't use sshpass by default just because it's documented — use it because it's the right tool for the situation.
+
+---
+
 ## Auth Fallback Pattern
 
 **Always try key auth first, then fall back to password with sshpass. Never give up after a publickey failure.**
