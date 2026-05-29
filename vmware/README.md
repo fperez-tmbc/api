@@ -105,6 +105,48 @@ Guest power operations require VMware Tools to be running in the VM.
 - **Windows disk → vSphere disk mapping:** Windows Disk N corresponds to vSphere SCSI 0:N (disk ID 200N). Disk 0 = C: (OS), subsequent disks follow SCSI unit order. Verify via SSH: `Get-Partition | Where-Object {$_.DriveLetter} | Select-Object DiskNumber, DriveLetter`.
 - **Windows partition extension after disk resize:** After growing the VMDK, SSH in and run `Resize-Partition -DiskNumber N -PartitionNumber N -Size (Get-PartitionSupportedSize ...).SizeMax` to extend the NTFS partition.
 
+## Role & Permission Management
+
+When an operation fails with "Permission to perform this operation was denied", identify the missing privilege and offer to add it to the `TMBC - Automation Access` role before falling back to an alternative approach.
+
+### Check what privileges a role has
+
+```powershell
+$role = Get-VIRole -Name "TMBC - Automation Access"
+$role.PrivilegeList | Sort-Object   # full list
+$role.PrivilegeList | Where-Object { $_ -like "VirtualMachine.Config.*" }  # filtered
+```
+
+### Check whether svcclaude has a specific privilege (any assigned role)
+
+```powershell
+$perms = Get-VIPermission | Where-Object { $_.Principal -like "*svcclaude*" }
+foreach ($perm in $perms) {
+    $r = Get-VIRole -Name $perm.Role
+    $hit = $r.PrivilegeList | Where-Object { $_ -like "*Config.Settings*" }
+    if ($hit) { Write-Host "Found in role: $($perm.Role) on $($perm.Entity)" }
+}
+```
+
+### Add a privilege to the role
+
+```powershell
+$role = Get-VIRole -Name "TMBC - Automation Access"
+Set-VIRole -Role $role -AddPrivilege (Get-VIPrivilege -Id "VirtualMachine.Config.Settings")
+```
+
+To find the exact privilege ID when you only know part of the name:
+
+```powershell
+Get-VIPrivilege | Where-Object { $_.Id -like "*Config.Settings*" } | Select-Object Id, Name
+```
+
+### Notes
+
+- `TMBC - Automation Access` is the role that covers `svcclaude` at the `Datacenters` level with propagation — changes here apply to all VMs automatically.
+- Changes to a role take effect immediately; no vCenter restart or re-login required.
+- Adding a privilege here widens access for anything else using that role — confirm with Frank before making changes.
+
 ## PowerCLI Fallback
 
 Use PowerCLI for operations the REST API does not expose (rename, move to folder/resource pool):
