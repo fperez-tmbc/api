@@ -270,7 +270,7 @@ Useful to grab the subject line (which includes the magic `##display_id##` token
 
 Returns `{"response_status": {"status_code": 2000, "status": "success"}}` on success.
 
-**Replies default to private in the portal** even though the email is delivered to the requester. Always include `"show_to_requester": true` in the `notification` payload to mark the reply as public. Field name unverified — confirm via testing and update this note.
+**Replies default to private in the portal** even though the email is always delivered to the requester. The reply endpoint does not support a visibility field — `show_to_requester` is rejected with `EXTRA_KEY_FOUND_IN_JSON`. There is no known way to mark replies as public via the API; flip visibility manually in the portal if needed.
 
 ---
 
