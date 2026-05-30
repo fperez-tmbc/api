@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 # regenerate-refresh-token.sh — exchange a grant code for a new refresh token.
 #
 # Usage: ./regenerate-refresh-token.sh <grant-code>

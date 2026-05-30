@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 # sdp-api.sh — shared helpers for ServiceDesk Plus Cloud v3 API
 # Sourced by the other scripts in this folder. Not meant to be executed directly.
 # Compatible with bash and zsh.
@@ -32,8 +32,7 @@ set -o pipefail
 # Creds live at ~/GitHub/.tokens/sdp (never inside a repo folder).
 # Callers should set SDP_CREDS_FILE before sourcing this script. The fallback below
 # is used when running scripts directly from api/sdp/.
-_SDP_API_DIR="${0:A:h}"
-[ -z "$_SDP_API_DIR" ] && _SDP_API_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+_SDP_API_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 SDP_CREDS_FILE="${SDP_CREDS_FILE:-$HOME/GitHub/.tokens/sdp}"
 
 load_creds() {

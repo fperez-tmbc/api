@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 # close-ticket.sh — close an existing ticket in ServiceDesk Plus Cloud.
 #
 # Usage: ./close-ticket.sh <request-id> <closure-payload.json>

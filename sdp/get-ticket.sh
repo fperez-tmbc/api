@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 # get-ticket.sh — GET a ticket back from ServiceDesk Plus Cloud.
 #
 # Usage: ./get-ticket.sh <request-id>
