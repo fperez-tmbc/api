@@ -12,7 +12,7 @@
 #   → Description: (anything; "SDP ticket creation + user mgmt + setup metadata" works)
 #   → copy the generated code, paste it as this script's argument
 #
-# The script prints the new refresh_token and reminds you to update .sdp-creds.
+# The script prints the new refresh_token and reminds you to update ~/GitHub/.tokens/sdp.
 
 set -o pipefail
 
@@ -28,7 +28,7 @@ SCRIPT_DIR="${0:A:h}"
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/sdp-api.sh"
 
-# We only need CLIENT_ID/CLIENT_SECRET from .sdp-creds; REFRESH_TOKEN may be stale.
+# We only need CLIENT_ID/CLIENT_SECRET from ~/GitHub/.tokens/sdp; REFRESH_TOKEN may be stale.
 # Load the file but tolerate an empty REFRESH_TOKEN.
 if [ ! -f "$SDP_CREDS_FILE" ]; then
   echo "ERROR: $SDP_CREDS_FILE not found." >&2

@@ -29,17 +29,17 @@
 
 set -o pipefail
 
-# .sdp-creds lives in the task-tracker repo root (~/GitHub/task-tracker/.sdp-creds).
+# Creds live at ~/GitHub/.tokens/sdp (never inside a repo folder).
 # Callers should set SDP_CREDS_FILE before sourcing this script. The fallback below
 # is used when running scripts directly from api/sdp/.
 _SDP_API_DIR="${0:A:h}"
 [ -z "$_SDP_API_DIR" ] && _SDP_API_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-SDP_CREDS_FILE="${SDP_CREDS_FILE:-$HOME/GitHub/task-tracker/.sdp-creds}"
+SDP_CREDS_FILE="${SDP_CREDS_FILE:-$HOME/GitHub/.tokens/sdp}"
 
 load_creds() {
   if [ ! -f "$SDP_CREDS_FILE" ]; then
     echo "ERROR: credentials file not found at $SDP_CREDS_FILE" >&2
-    echo "       copy .sdp-creds.example or populate the file with CLIENT_ID/CLIENT_SECRET/REFRESH_TOKEN" >&2
+    echo "       populate ~/GitHub/.tokens/sdp with CLIENT_ID/CLIENT_SECRET/REFRESH_TOKEN" >&2
     return 1
   fi
 
