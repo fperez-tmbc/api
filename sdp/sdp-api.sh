@@ -70,7 +70,14 @@ zoho_oauth_url() {
 
 # Fetches a fresh access token. Echoes the token to stdout on success.
 # Also exports ACCESS_TOKEN and ACCESS_TOKEN_SCOPE for downstream callers.
+# If ACCESS_TOKEN is already set (e.g. inherited from a parent shell that already
+# refreshed), skip the Zoho call to avoid hitting the token-endpoint rate limit.
 refresh_token() {
+  if [ -n "$ACCESS_TOKEN" ]; then
+    echo "$ACCESS_TOKEN"
+    return 0
+  fi
+
   local response http_status tmpfile
   tmpfile=$(mktemp /tmp/sdp_token_XXXXXX.json)
 
