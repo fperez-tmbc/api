@@ -554,6 +554,31 @@ Tested and confirmed invalid (return `4007 Invalid URL`):
 
 ## Scripting Gotchas
 
+### Windows / Git Bash — python3 not found
+
+Scripts use `python3` for JSON parsing. On Windows, Python installs as `python.exe` only — there is no `python3.exe`. The Microsoft Store App Execution Alias intercepts the `python3` command and returns a "run without arguments to install" error, even when the real Python directory is on PATH.
+
+**Fix:** create a wrapper script at `~/bin/python3` (Git Bash's `~/bin` is on PATH before the WindowsApps stub):
+
+```bash
+mkdir -p ~/bin
+cat > ~/bin/python3 << 'EOF'
+#!/bin/bash
+exec "/c/Users/<username>/AppData/Local/Programs/Python/Python3XX/python.exe" "$@"
+EOF
+chmod +x ~/bin/python3
+```
+
+Also add the Python directory to PATH in `~/.bashrc` so pip-installed tools are findable:
+
+```bash
+export PATH="/c/Users/<username>/AppData/Local/Programs/Python/Python3XX:/c/Users/<username>/AppData/Local/Programs/Python/Python3XX/Scripts:$PATH"
+```
+
+On the TMBC VM (`2fperez`), this is already set up with Python 3.13 at the path above.
+
+---
+
 ### API responses contain literal newlines inside JSON strings — use `strict=False`
 
 The SDP API returns JSON with literal (unescaped) newline characters embedded inside string values (most often in `description` fields). This is technically invalid JSON. Python's `json.loads()` rejects it by default.
