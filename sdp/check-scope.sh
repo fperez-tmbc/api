@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 # check-scope.sh — probe the current refresh token's scope.
 #
 # Exchanges the refresh token for an access token, prints the reported scope,

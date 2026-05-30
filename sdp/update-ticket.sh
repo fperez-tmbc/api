@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 # update-ticket.sh — PUT an update to an existing ticket in SDP Cloud.
 #
 # Usage: ./update-ticket.sh <request-id> <payload.json>

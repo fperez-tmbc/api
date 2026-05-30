@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 # list-categories.sh — dump configured lookup values from SDP Cloud.
 # Requires SDPOnDemand.setup.ALL (or .READ) scope.
 # Useful when POST /requests fails with an "invalid value" error.

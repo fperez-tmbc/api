@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 # create-ticket.sh — POST a ticket to ServiceDesk Plus Cloud.
 #
 # Usage: ./create-ticket.sh <payload.json>
