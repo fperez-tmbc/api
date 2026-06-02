@@ -2,7 +2,24 @@
 
 Field notes from hands-on work against the Cloudflare API.
 
-## Authentication
+## Access Methods
+
+Two ways to interact with Cloudflare — use whichever fits the task:
+
+| Task | Use |
+|------|-----|
+| DNS record create/update/delete | REST API (token auth) |
+| List Workers, get Worker code | MCP (faster, no auth setup) |
+| Cloudflare docs lookup | MCP `search_cloudflare_documentation` |
+| D1, KV, R2, Hyperdrive inspection | MCP |
+| Scripted/automated operations | REST API |
+
+### MCP (Cloudflare Developer Platform)
+Available as `mcp__claude_ai_Cloudflare_Developer_Platform__*` tools in claude.ai sessions. No token needed — authenticated via the claude.ai integration. Use `set_active_account` first if multiple accounts are in scope.
+
+Key tools: `workers_list`, `workers_get_worker`, `workers_get_worker_code`, `search_cloudflare_documentation`, `kv_namespaces_list`, `d1_databases_list`, `r2_buckets_list`.
+
+### REST API
 - Bearer token: `Authorization: Bearer <TOKEN>` on all requests
 - Token stored at `~/GitHub/.tokens/cloudflare`
 - Verify token: `GET https://api.cloudflare.com/client/v4/user/tokens/verify`
