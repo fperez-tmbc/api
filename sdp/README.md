@@ -276,13 +276,34 @@ Returns `{"response_status": {"status_code": 2000, "status": "success"}}` on suc
 
 ### Conversations
 
-Read-only. Returns the full email/note history for a ticket.
+Read-only. Returns the email/note history for a ticket.
 
 | Operation | Method | Endpoint |
 |-----------|--------|----------|
 | List conversations | GET | `/requests/{id}/conversations` |
+| **Read a conversation's body** | GET | `/requests/{id}/notifications/{conversation_id}` |
 
 **POST to `/conversations` returns `Invalid Method` — use `/reply` instead.**
+
+#### Reading reply bodies — YES, this works (don't believe otherwise)
+
+The list endpoint (`/conversations`) returns only metadata per entry — `id`, `type`, `created_time`, `created_by`, `show_to_requester` — **no message body**. And `GET /requests/{id}/conversations/{conversation_id}` returns `4007 Invalid URL`. Those two facts can lead you to wrongly conclude replies aren't readable via the API. **They are.**
+
+To get the full body of any conversation entry (incoming requester replies *and* technician replies), use the **notifications** endpoint with the same `id` from the conversation list:
+
+```bash
+sdp_call GET "/requests/{internal_id}/notifications/{conversation_id}"
+# → .notification.description holds the full HTML body
+# → .notification.subject, .notification.attachments also present
+```
+
+Workflow to read a whole thread:
+1. `GET /requests/{id}/conversations` (add `input_data={"list_info":{"row_count":"50"}}` — defaults to 10) to list entries.
+2. Filter to the human messages: `type` = `REQREPLY` (technician replies) and `CONVERSATION` (incoming requester replies). Skip the `*_E-Mail` system-notification types.
+3. For each, `GET /requests/{id}/notifications/{conversation_id}` and read `.notification.description`.
+4. The HTML body includes the quoted prior thread — split on `-----Original Message-----`, `From: ServiceDesk`, or `Request Id ##NNNN## is appended` to isolate the new text.
+
+Verified working 2026-06-03 on ticket 101252.
 
 #### Conversation types seen in the wild
 
@@ -292,8 +313,11 @@ Read-only. Returns the full email/note history for a ticket.
 | `RequestAssignReqrNotify_E-Mail` | Notification to requester when ticket is assigned |
 | `QueueReqTechNotify_E-Mail` | Notification to technician when ticket enters queue |
 | `TechIntimation_E-Mail` | Technician intimation email |
+| `NotifyUsers_E-Mail` | System notification to users on a reply/update |
+| `Technician_Thread_E-Mail` | System thread email to technician |
 | `NOTES` | Notes added via the `/notes` endpoint |
-| `REQREPLY` | Email reply sent via the `/reply` endpoint |
+| `REQREPLY` | Technician email reply sent via the `/reply` endpoint — body readable via `/notifications/{id}` |
+| `CONVERSATION` | Incoming email reply from the requester — body readable via `/notifications/{id}` |
 
 ---
 
@@ -526,7 +550,7 @@ Tested and confirmed invalid (return `4007 Invalid URL`):
 - `GET/POST /requests/{id}/replies`
 - `GET /requests/{id}/send_reply`
 - `GET /requests/{id}/emails`
-- `GET /requests/{id}/conversations/{conversation_id}` (individual conversation lookup)
+- `GET /requests/{id}/conversations/{conversation_id}` (individual conversation lookup) — **but** the body IS retrievable via `GET /requests/{id}/notifications/{conversation_id}`. See the Conversations section; reply content is readable, just not under this path.
 
 ---
 
