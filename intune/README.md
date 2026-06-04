@@ -75,6 +75,21 @@ H={"Authorization":f"Bearer {ig.get_token()}"}
 requests.get("https://graph.microsoft.com/beta/deviceAppManagement/mobileApps?$top=999",headers=H)
 ```
 
+### winGetApp ("Microsoft Store app (new)") — install behavior is IMMUTABLE
+
+`installExperience.runAsAccount` (System vs User) is set at creation and cannot be
+changed: PATCH returns `BadRequest: The property 'InstallExperience' cannot be patched`,
+and there's no in-place edit in the portal either. To change it you must DELETE and
+RECREATE the app, then re-add assignments. Done 2026-06-04 for 1Password (System→User):
+new app id `3d48684f-79ea-4e9f-8a58-4a979f442a2c`, packageIdentifier `9NZWS5X28P0J`,
+Required → All Licensed Users, excluding "Windows Servers".
+
+### winGetApp must reach `publishingState=published` before /assign
+
+A freshly POSTed winGetApp pulls Store metadata asynchronously. Calling `/assign`
+immediately returns `BadRequest: app's PublishingState is not 'Published'`. Poll
+`?$select=publishingState` until `published` (usually <30s), then assign.
+
 ### Delegated vs Application permission GUIDs are different
 
 The same permission has two different GUIDs in the Graph SP depending on type:
