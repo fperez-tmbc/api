@@ -39,6 +39,7 @@ r = requests.get(f"{BETA}/deviceManagement/deviceManagementScripts", headers=hea
   - `AuditLog.Read.All`
   - `DeviceManagementScripts.ReadWrite.All`
   - `DeviceManagementManagedDevices.Read.All`
+  - `DeviceManagementApps.Read.All` (added 2026-06-04 — read-only; required for `/deviceAppManagement/mobileApps`; appRole GUID `7a6ee1e7-141e-4cec-ae74-d9db155731ff`)
 
 If a task requires a permission not listed above, **add it to this app** rather than
 creating a temporary app registration. See "Adding permissions" below.
