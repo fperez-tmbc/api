@@ -55,6 +55,26 @@ creating a temporary app registration. See "Adding permissions" below.
 (AADSTS65002) preventing it from obtaining `DeviceManagement*` scopes. This cannot
 be worked around — use `igraph` or a dedicated app registration instead.
 
+### `v1.0/mobileApps` SILENTLY OMITS `winGetApp` ("Microsoft Store app (new)")
+
+The `v1.0` `/deviceAppManagement/mobileApps` collection does **not** return
+`microsoft.graph.winGetApp` entities, and it drops `@odata.type` on
+`macOsVppApp` entries. This is a silent omission — no error, the missing apps
+just aren't in the list. It caused a wrong "no Windows 1Password app exists"
+conclusion (2026-06-04) when the app was a Store/winget deployment all along.
+
+**Always query `beta` for `mobileApps` when Store/winget apps may be involved.**
+`igraph` is hardcoded to `v1.0` (see `GRAPH` const) — use an inline `beta` call
+reusing `igraph`'s `get_token()` (SourceFileLoader to import it):
+
+```python
+import importlib.machinery, importlib.util, requests
+loader=importlib.machinery.SourceFileLoader('igraph','/Users/fperez2nd/GitHub/api/intune/igraph')
+ig=importlib.util.module_from_spec(importlib.util.spec_from_loader('igraph',loader)); loader.exec_module(ig)
+H={"Authorization":f"Bearer {ig.get_token()}"}
+requests.get("https://graph.microsoft.com/beta/deviceAppManagement/mobileApps?$top=999",headers=H)
+```
+
 ### Delegated vs Application permission GUIDs are different
 
 The same permission has two different GUIDs in the Graph SP depending on type:
