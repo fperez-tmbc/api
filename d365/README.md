@@ -476,6 +476,19 @@ curl -s -X PATCH "${BASE_URL}/data/SystemUsers('jsmith')" \
 
 A 204 response indicates success. Note: other Yes/No fields on `SystemUsers` use strings (`"Yes"`/`"No"`), but `Enabled` is a true boolean.
 
+### Determining genuinely-disabled users — PROD is the source of truth
+
+**Do not use a lower environment's `Enabled` flag to decide who is an inactive/disabled user.** D365 routinely refreshes the lower environments (UAT, QA, sandboxes) from PROD, and the refresh process **disables accounts** as a side effect. So a disabled account in UAT/QA is very often an *active* employee whose sandbox account was disabled by the refresh — not someone who left.
+
+Confirmed 2026-06-04 ratios: PROD 70/159 disabled, UAT 84/175, QA 123/170. The lower envs over-report disabled by a wide margin.
+
+**Correct pattern for any "remove/clean up disabled users" task (role assignments, etc.):**
+1. Build the authoritative disabled-user list from **PROD** (`SystemUsers` where `Enabled=false`).
+2. Derive the exact (UserId, Role) removal list in PROD.
+3. Apply that **same** list to the lower environments — match on (UserId, Role), ignore the lower env's own `Enabled` flag entirely.
+
+Driving off each environment's own flag wrongly strips roles from active employees in the lower envs. (This exact mistake was made and corrected on tickets 101273/101274.)
+
 ### Legal entity company codes (UAT/PROD confirmed)
 
 | Code | Notes |
@@ -646,6 +659,16 @@ All support `$filter=SecurityRoleIdentifier eq '<AOT name>'`. Each record includ
 
 ### `user_impersonation` scope works for client credentials
 The D365 Dynamics ERP permission (`user_impersonation`) is a delegated scope, but it works with the client credentials flow when the app is registered in D365's Entra ID applications list. D365 maps the app's token to the user account specified in the registration.
+
+### Bulk OData writes throttle sandboxes — keep concurrency low, never run side-queries during a bulk job
+
+Mass PATCH operations (e.g. disabling hundreds of `SecurityUserRoleAssociations`) throttle the **sandbox** environments hard. PROD absorbed ~700 writes at concurrency 5 cleanly, but UAT (~660 writes) hit cascading `503`s and then went to a blanket `404` across all endpoints — the AOS **recycled** under the load and was unavailable for a while afterward. A genuinely down/recycling environment returns `404` (or `503`) on *everything* including `/data/Companies` and `/data/` root, even with a valid token.
+
+Mitigations confirmed 2026-06-04:
+- **Low concurrency** (≤3–5 workers) for bulk writes; PROD tolerates 5, sandboxes prefer 3.
+- **Retry with backoff** on `400`, `429`, `503`. Transient `400`s also appear under concurrency on `SecurityUserRoleAssociations` writes and succeed on a calm retry — they are not validation errors.
+- **Never run side read-queries against an environment while a bulk write job is hitting it** — concurrent reads compound the throttling and can tip the env into a recycle.
+- Run the bulk job **foreground or as a tracked background task**; a `Ctrl`-interrupt of the agent turn can kill an untracked background job mid-run, leaving a partial state (verify with a state-diff afterward, not by assuming completion).
 
 ---
 
