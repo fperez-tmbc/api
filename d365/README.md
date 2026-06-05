@@ -514,6 +514,17 @@ GET /data/<Entity>?$count=true&$top=0
 ### Field names are PascalCase
 D365 OData returns PascalCase field names (`DataArea`, not `dataAreaId`). The field name in the entity schema matches what comes back in the response — always check `$metadata` or do a `$top=1` read first.
 
+### User-id field casing differs by entity — `UserId` vs `UserID`
+
+The "user id" field is spelled differently depending on the entity. Selecting, filtering, or key-referencing the wrong casing returns **400 Bad Request** — and D365 mislabels the reason phrase as `Internal Server Error`, so the HTTP status (400, not 500) is the real tell.
+
+| Entity | Field name |
+|--------|-----------|
+| `SecurityUserRoles`, `SecurityUserRoleAssociations` | `UserId` (lowercase **d**) — confirmed |
+| `SystemUsers` | `UserID` (capital **ID**) — confirmed |
+
+A plain `GET` with no `$select` returns every field regardless of casing, so the mismatch only surfaces on `$select`, `$filter`, or key lookups. The trap: when cross-referencing role members against account `Enabled` state, you read `UserId` off the assignment entity and must switch to `UserID` to look the same user up on `SystemUsers`. Confirmed 2026-06-04 (UAT/PROD/QA) — a `SystemUsers?$select=UserId,...` returned 400; `$select=UserID,...` worked.
+
 ### `EmailParameters` Exchange credentials not in OData
 When Microsoft added Exchange Online as an email provider in D365 F&O, the OAuth credentials (client ID, secret, tenant) were not surfaced as OData data entity fields. There is no programmatic way to set these via the API — UI configuration is required.
 
