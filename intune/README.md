@@ -81,8 +81,9 @@ requests.get("https://graph.microsoft.com/beta/deviceAppManagement/mobileApps?$t
 changed: PATCH returns `BadRequest: The property 'InstallExperience' cannot be patched`,
 and there's no in-place edit in the portal either. To change it you must DELETE and
 RECREATE the app, then re-add assignments. Done 2026-06-04 for 1Password (System→User):
-new app id `3d48684f-79ea-4e9f-8a58-4a979f442a2c`, packageIdentifier `9NZWS5X28P0J`,
-Required → All Licensed Users, excluding "Windows Servers".
+current app id `401addb8-8687-4c13-b01f-583bc563cc2f`, packageIdentifier `9NZWS5X28P0J`,
+Required → All Licensed Users, excluding "Windows Servers". (Recreating is also how you
+"reset the stats" — a new app object starts with zero deployment history.)
 
 ### winGetApp must reach `publishingState=published` before /assign
 
