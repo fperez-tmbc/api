@@ -321,6 +321,20 @@ Verified working 2026-06-03 on ticket 101252.
 
 ---
 
+### Inline images in ticket descriptions (screenshots) — retrieval
+
+Requesters often paste a screenshot into the ticket description (e.g. a table of users/roles). It is **not** a normal attachment — `GET /requests/{id}` shows `has_attachments: false`, and the image lives inline in the `description` HTML as:
+
+```html
+<img src="/app/itdesk/servlet/SDODAuthServlet?path=<fileId>&ACTION=FILE"/>
+```
+
+**You cannot fetch it with the API OAuth token.** That servlet is a browser endpoint — requesting it with `Authorization: Zoho-oauthtoken` (on either `sdpondemand.manageengine.com` or the `servicedesk.themyersbriggs.com` custom domain) returns **HTTP 302 to `accounts.zoho.com/signin`** (body size 0). The v3 API exposes no endpoint for inline description images (`/files/{id}`, `/inline_images/{id}`, `/requests/{id}/_uploads/{id}` all fail).
+
+**Via the M365 connector (partial — confirms but doesn't render):** the SDP notification email (`servicedesk@themyersbriggs.com`, subject `[Request ID :##NNNNNN##] ...`) carries the same screenshot as an **inline attachment**. `outlook_email_search` finds the mail; `read_resource` on the message returns `attachments[]` with `name`, `contentType: image/png`, `isInline: true`, and an attachment URI. **But** `read_resource` on that attachment URI returns the parent *message* again, not the raw image bytes — so it proves the attachment exists yet won't surface the image for analysis.
+
+**Reliable way to actually read the image:** have Frank snip/save it locally (drops it in `~/GitHub` or `C:\Users\2fperez\Pictures\Screenshots`), then read it with the `screenshot` skill / Read tool. Confirmed on ticket 101278 (2026-06-05).
+
 ---
 
 ### Solutions
