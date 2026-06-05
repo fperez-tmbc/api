@@ -631,6 +631,26 @@ sdp_put_input_data "/requests/${ID}/close" /tmp/sdp-payload.json
 
 ---
 
+### Windows: never let native Python write a temp file that bash will read — they disagree on `/tmp`
+
+On the Windows VM, the `python3` wrapper calls the **native** `python.exe`, which does **not** understand Git Bash's MSYS path mapping. If you build a payload with `open("/tmp/foo.json", "w")` in Python, Python resolves `/tmp/...` against the drive root → `C:\tmp\...` — a different location than Git Bash's `/tmp`, and usually nonexistent, so it throws `FileNotFoundError: [Errno 2] No such file or directory: '/tmp/foo.json'`. Even when `C:\tmp` happens to exist, `sdp_put_input_data` then `cat`s the **bash** `/tmp` path (a different folder), gets nothing, and silently PUTs/POSTs an empty body — the call returns a parse error or a no-op.
+
+This bit ticket 101277 (2026-06-05): the resolution/close payloads were written by Python's `open()` and never reached the API.
+
+**Fix:** have Python print the JSON to stdout and let **bash** create the file via redirection, so the same shell writes and reads it:
+
+```bash
+python3 - > /tmp/sdp-payload.json << 'PY'
+import json
+print(json.dumps({"request": { "category": {"name": "AX Systems"}, "subcategory": {"name": "D365 Security"}, "resolution": {"content": "<div>...</div>"} }}))
+PY
+sdp_put_input_data "/requests/${ID}" /tmp/sdp-payload.json
+```
+
+**Rule:** whatever writes the temp file must be the same shell that reads it. Build payload files with a bash heredoc / `echo` / stdout redirection — not with Python's `open()`. Sanity-check with `wc -c < /tmp/sdp-payload.json` (non-zero) before the call. This applies to any script on the VM that mixes native-Python file writes with bash reads, not just SDP.
+
+---
+
 ### Don't call helper scripts as subprocesses inside a heredoc that already has a token
 
 `get-ticket.sh`, `update-ticket.sh`, and similar scripts each source `sdp-api.sh` and call `refresh_token` internally — they do not inherit `$ACCESS_TOKEN` from a parent shell. If you call one of these scripts as a subprocess (`zsh /path/to/get-ticket.sh`) inside a heredoc block that already called `refresh_token`, Zoho sees two rapid refresh calls and rate-limits the second one. The script then proceeds with an empty token, curl returns empty output, and any JSON parsing step fails with `Expecting value: line 1 column 1 (char 0)`.
