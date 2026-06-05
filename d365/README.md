@@ -476,6 +476,39 @@ curl -s -X PATCH "${BASE_URL}/data/SystemUsers('jsmith')" \
 
 A 204 response indicates success. Note: other Yes/No fields on `SystemUsers` use strings (`"Yes"`/`"No"`), but `Enabled` is a true boolean.
 
+### Create a user via OData — exact field names required
+
+Creating a `SystemUsers` record over OData works, but you must use the entity's **exact** field names. Guessing fails in a misleading way:
+
+- Missing language fields → `400`: `Field 'UserInfo_language' must be filled in.; Field 'Helplanguage' must be filled in.`
+- Wrong field names (`Language`/`HelpLanguage` instead of the real ones) → `400` with the generic `Exception has been thrown by the target of an invocation` (looks like an AAD/Graph failure, but it's just the wrong field name).
+
+Working field set (confirmed 2026-06-05 across DEVTEST39/UAT/QA):
+
+```bash
+curl -s -X POST "${BASE_URL}/data/SystemUsers" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{
+    "UserID": "jsmith",
+    "UserName": "Jane Smith",
+    "Alias": "jsmith@themyersbriggs.com",
+    "Email": "jsmith@themyersbriggs.com",
+    "Company": "2100",
+    "NetworkDomain": "https://sts.windows.net/themyersbriggs.com/",
+    "UserInfo_language": "en-us",
+    "Helplanguage": "en-us",
+    "UserInfo_defaultPartition": true,
+    "AccountType": "ClaimsUser",
+    "Enabled": false
+  }'
+```
+
+- `UserInfo_language` and `Helplanguage` are required (UI labels them Language / Help language; entity field names differ). `en-us` is safe.
+- `NetworkDomain`: corporate `@themyersbriggs.com` users → `https://sts.windows.net/themyersbriggs.com/`; D365-tenant-native `@themyersbriggs.onmicrosoft.com` accounts → `https://sts.windows.net/` (no suffix).
+- D365 **auto-assigns the default `SYSTEMUSER` role** on creation, so a new user starts with 1 role.
+- You can create a user with `Enabled: false` and still assign roles to it — disabled accounts hold role assignments. This is the way to clone a user into a sandbox for role parity without consuming a license.
+- `201` = created. The supported UI alternative is **System administration → Users → Import users** (resolves Entra automatically); the OData create above does not need the Entra Object ID/SID.
+
 ### Determining genuinely-disabled users — PROD is the source of truth
 
 **Do not use a lower environment's `Enabled` flag to decide who is an inactive/disabled user.** D365 routinely refreshes the lower environments (UAT, QA, sandboxes) from PROD, and the refresh process **disables accounts** as a side effect. So a disabled account in UAT/QA is very often an *active* employee whose sandbox account was disabled by the refresh — not someone who left.
