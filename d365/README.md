@@ -653,6 +653,21 @@ curl -s -G "${BASE_URL}/data/Entity" \
   --data-urlencode "\$select=UserId"
 ```
 
+### Python `urllib` rejects unencoded OData query params (errors, unlike curl)
+
+The bash trap above fails *silently*; the Python equivalent fails *loudly*. `urllib.request.urlopen` raises `http.client.InvalidURL: URL can't contain control characters` on the space in `UserId eq 'x'` and never sends the request — `urllib` does **not** auto-encode the query string. Encode it yourself:
+
+```python
+import urllib.parse
+q = urllib.parse.urlencode(
+    {"$filter": "UserId eq 'jsmith'", "$select": "UserId,AssignmentStatus"},
+    quote_via=urllib.parse.quote,   # encode spaces as %20, not '+'
+)
+url = f"{BASE_URL}/data/SecurityUserRoleAssociations?{q}"
+```
+
+Use `quote_via=urllib.parse.quote` so spaces become `%20` (the default `+` can be misread by some OData parsers). Confirmed 2026-06-05.
+
 ### `DELETE` on `SecurityUserRoleAssociations` is a silent no-op
 
 `DELETE /data/SecurityUserRoleAssociations(UserId='...',SecurityRoleIdentifier='...')` returns 204 but does not remove the record. To remove a role from a user, PATCH `AssignmentStatus` to `"Disabled"` instead. See the Security Role Management section for the correct pattern.
