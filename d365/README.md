@@ -509,6 +509,21 @@ curl -s -X POST "${BASE_URL}/data/SystemUsers" \
 - You can create a user with `Enabled: false` and still assign roles to it — disabled accounts hold role assignments. This is the way to clone a user into a sandbox for role parity without consuming a license.
 - `201` = created. The supported UI alternative is **System administration → Users → Import users** (resolves Entra automatically); the OData create above does not need the Entra Object ID/SID.
 
+### Delete a user via OData — a real delete (unlike `SecurityUserRoleAssociations`)
+
+`DELETE /data/SystemUsers('<userid>')` genuinely removes the user record in F&O — returns `204`, and a follow-up `GET` returns `404`. This is **not** the silent no-op that `DELETE` is on `SecurityUserRoleAssociations`. The user's role assignments go with the record.
+
+```bash
+curl -s -o /dev/null -w "%{http_code}" -X DELETE \
+  "${BASE_URL}/data/SystemUsers('lmenig')" \
+  -H "Authorization: Bearer ${TOKEN}"
+# 204 = deleted; re-GET returns 404 to confirm
+```
+
+F&O blocks deletion of users referenced by worker records or posted transactions (FK constraint error); orphaned / never-transacted accounts delete cleanly. Always confirm with a follow-up `GET` (expect `404`) rather than assuming the 204 took.
+
+Confirmed 2026-06-06 removing an orphaned sandbox account (`lmenig` / Latoya Menig) from DEV and QA — present only in those two sandboxes, absent from PROD/UAT, and with no corporate Entra identity. Both deletes returned 204 and verified 404 on re-read.
+
 ### Determining genuinely-disabled users — PROD is the source of truth
 
 **Do not use a lower environment's `Enabled` flag to decide who is an inactive/disabled user.** D365 routinely refreshes the lower environments (UAT, QA, sandboxes) from PROD, and the refresh process **disables accounts** as a side effect. So a disabled account in UAT/QA is very often an *active* employee whose sandbox account was disabled by the refresh — not someone who left.
