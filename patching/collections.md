@@ -2,6 +2,8 @@
 
 Maps each PDQ collection to its patching requirements. Read this file at the start of every patch run.
 
+**PDQ Deploy output format (post-update):** Deploy output now uses `ID     : 246401` (colon-separated). Always parse the deployment ID with `awk '/^ID/{print $NF}'` — NOT `$2` (which grabs the colon).
+
 **F5 rule:** Only the collections explicitly listed as "Yes" below require F5 commands. No other collection or list of computers needs F5 involvement unless explicitly stated at the time of the request.
 
 | Collection | F5 Required | F5 Config Key |
