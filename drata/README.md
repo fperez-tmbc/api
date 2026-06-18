@@ -85,3 +85,32 @@ Valid `employmentStatus` values: `CURRENT_EMPLOYEE`, `CURRENT_CONTRACTOR`, `FORM
 - **Personnel list is heavily polluted with service accounts** — health mailboxes and other service accounts dominate the early pages; actual employees may not appear until page 2 or 3 when paginating with `limit=50`
 - **Device document upload uses `multipart/form-data`** — pass `file` as a named binary field with a filename and MIME type; passing raw bytes without a filename causes a 400
 - **Disconnecting an MDM integration does not purge synced device records** — devices from a removed integration persist in Drata indefinitely; no DELETE or archive API endpoint exists for devices; only option is to unlink from personnel and add a note, or contact Drata support
+
+## MCP Server (OAuth) — added 2026-06-18
+
+Drata exposes a remote **MCP (Model Context Protocol)** server, separate from the REST API.
+
+- **Endpoint:** `https://mcp.drata.com/mcp/`
+- **Auth:** OAuth, **not** the static API key. Per-user — each person logs in as themselves; effective access = the user's Drata role ∩ the config's scopes. No secret to store; the endpoint URL is all a client needs.
+- **Config in Drata UI:** Configuration → **MCP Configuration** (distinct from "OAuth Applications"). The config we created is `MCP — Compliance API Access` (shared, set to *Never expires* — flag for renewal review).
+
+### Adding it to Claude Code
+```bash
+claude mcp add --transport http drata https://mcp.drata.com/mcp/ -s user
+```
+- **Gotcha: a newly added MCP server does NOT load mid-session.** `/mcp` won't list it and tools won't appear until Claude Code is **restarted**. After restart the server loads but shows "Needs authentication".
+- Auth is driven by the server's own `authenticate` / `complete_authentication` tools (or `/mcp` → drata → Authenticate). On a **local** session the `http://localhost:3118/callback` redirect is caught automatically and the flow completes; if the redirect page errors, paste the full callback URL back to complete it.
+
+### Scopes (the `MCP — Compliance API Access` config — 20 total)
+Read: controls, monitor-test, policy, assigned-policies, risk, risk-registers, workspace, users, user, framework, evidence, vendor, vendor-security-review, vendor-document.
+**Write/delete:** `create:control`, `update:control`, `create:evidence`, `update:evidence`, `delete:evidence`.
+OAuth scopes are a **ceiling**, not a grant — they don't escalate anyone past their Drata role.
+
+### Tools exposed
+- Read: `Drata_listWorkspaces`, `Drata_searchControls`, `Drata_listPolicies`/`Drata_searchPolicies`, `Drata_listRequirements`, `Drata_searchMonitoringTests`, `Drata_searchRisks`, `Drata_listRiskRegisters`, `Drata_listEvidence`, `Drata_listVendors`/`Drata_getVendor`, `Drata_listVendorDocuments`, `Drata_listVendorSecurityReviews`
+- Write: `Drata_createControl`, `Drata_updateControl`, `Drata_createEvidence`, `Drata_updateEvidence`, `Drata_deleteEvidence`
+
+### When to use which
+- **MCP** is interactive only (browser OAuth) — does **not** work headless/cron. Use it for ad-hoc, conversational queries and directed actions.
+- **Keep the static API key** (`~/GitHub/.tokens/drata`) for the scripted/cron flows (`all_compliance_report.py`, etc.) — those can't do an interactive OAuth login.
+- `Drata_searchControls` counting: use **list mode** (`is_ready`/`has_evidence`/`has_policy`/etc. filters) and read `pagination.totalCount` — never a search `query` — for accurate counts.
