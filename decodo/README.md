@@ -103,15 +103,20 @@ Walmart, Target, YouTube, Reddit, TikTok, ChatGPT, Perplexity. For SERP ad
 monitoring use **`google_ads`**; `bing_search` for Bing (its parsed ad-field
 shape is not yet validated here).
 
-## Cost note — google_ads + render is pricier
+## Pricing (confirmed from dashboard 2026-06-23, per 1k requests)
 
-`google_ads` + `headless:html` uses premium pool + browser rendering, so it costs
-**more than plain google_search**. The free $1 budget covers fewer requests at
-this tier. Confirm the exact per-request price for this combination in the
-dashboard before forecasting.
+Rate depends on proxy pool + JS rendering. Free-plan rates:
 
-## Pricing
+| Pool | rate /1k |
+|------|----------|
+| Standard | $0.50 |
+| Standard + JS | $0.75 |
+| Premium | $1.00 |
+| **Premium + JS** | **$1.50** |
 
-Free plan caps at **$1** (~a few hundred requests). The playground showed roughly
-**$1.5 / 1,000 requests** for the selected config — verify per target/options
-before forecasting cost. Cost ≈ `(countries × keywords) / 1000 × price_per_1k`.
+Template targets (incl. `google_ads`) run on the **Premium** pool, and we enable
+JS rendering (`headless:html`), so our effective rate is **Premium + JS =
+$1.50/1k** on the free plan. Paid plans lower this toward ~$1.00-1.20/1k. The free
+plan = **$1** of usage ≈ **666 requests** at $1.50/1k. Rate limit 10 req/s (free).
+
+Cost ≈ `(countries × keywords) / 1000 × 1.50`.
