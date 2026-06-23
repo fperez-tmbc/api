@@ -1,5 +1,43 @@
 # Exchange Online API Notes
 
+## macOS gotcha: EXO PowerShell module is broken — call the REST adminapi instead
+
+On macOS, the `ExchangeOnlineManagement` module (3.10) throws on every REST cmdlet:
+`Method invocation failed because [System.Net.Http.HttpResponseMessage] does not
+contain a method named 'GetResponseHeader'`. Confirmed on **both** PowerShell 7.6
+and 7.4 — it's a macOS bug in the module's REST layer, not a pwsh-version issue.
+(The Windows VM `vmnofrankp71` connects but its network path returns `417
+Expectation Failed`, intermittently breaking the module there too.)
+
+**Workaround — hit the EXO admin REST API directly from Python** (no module, no
+bug; works from macOS with clean egress). Get an app-only token with the
+`claude-exo` cert via MSAL, then POST `InvokeCommand`:
+
+```python
+import json, msal, requests
+cfg = json.load(open("~/GitHub/.tokens/exo-claude/config.json".replace("~", __import__("os").path.expanduser("~"))))
+app = msal.ConfidentialClientApplication(
+    cfg["appId"], authority=f"https://login.microsoftonline.com/{cfg['tenantId']}",
+    client_credential={"private_key": open(cfg["certPem"].replace("cert.pem","key.pem")).read(),
+                       "thumbprint": cfg["thumbprint"],
+                       "public_certificate": open(cfg["certPem"]).read()})
+tok = app.acquire_token_for_client(["https://outlook.office365.com/.default"])["access_token"]
+
+def invoke(cmdlet, params):
+    r = requests.post(f"https://outlook.office365.com/adminapi/beta/{cfg['tenantId']}/InvokeCommand",
+                      headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
+                      json={"CmdletInput": {"CmdletName": cmdlet, "Parameters": params}}, timeout=60)
+    return r.status_code, r.json()
+# e.g. invoke("Get-DistributionGroupMember", {"Identity": "grp@themyersbriggs.com"})
+#      invoke("New-ApplicationAccessPolicy", {"AppId": "...", "PolicyScopeGroupId": "...", "AccessRight": "RestrictAccess"})
+```
+
+Response is clean JSON (`{"value": [...]}`), far easier than the module's CLIXML.
+Note: **Application Access Policies take up to ~30 min (sometimes ~1 hr) to take
+effect on actual mail sending**, even after `Test-ApplicationAccessPolicy` returns
+`Granted`. A 403 `[RAOP] Blocked by tenant configured AppOnly AccessPolicy` right
+after creating a policy is propagation lag, not misconfiguration.
+
 ## Exchange Online PowerShell — Unattended / App-Only Auth
 
 Basic auth and user-delegated auth are not viable on macOS for non-interactive use. App-only auth via a registered Entra app + certificate is the correct approach.
