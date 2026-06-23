@@ -71,14 +71,44 @@ body["results"][0]["content"]["results"]["results"]   # -> the SERP sections
 
 `pla[]` = product-listing / shopping ads (different shape).
 
-## Gotcha — ad capture is volatile / unreliable
+## Getting ads to appear (SOLVED — use google_ads + JS rendering)
 
-`paid[]` is **frequently empty** even for high-competition queries. Observed the
-*same* query (`car insurance quotes`, US) return 1 paid ad and then 0 ads minutes
-later. Google appears to suppress ads for scraper/proxy traffic. For an
-ad-monitoring use case this is the central reliability risk. Levers worth testing
-before relying on it: **premium proxy pool**, **JS rendering on**, `device_type:
-mobile`, and **city-level geo** instead of country-level.
+With `target=google_search` and no rendering, `paid[]` came back **empty even for
+high-competition queries** (Google suppresses ads for non-human-looking traffic).
+The same `car insurance quotes` query returned 1 ad then 0 minutes later.
+
+**Fix (measured 0 → 5-6 ads on the same queries):**
+
+- Use `target=google_ads` — purpose-built to surface paid ads "at the highest ad
+  display rate". Works on the **Free** plan (docs say "Advanced plan" but it ran
+  fine; watch for enforcement / higher cost).
+- Set `headless: "html"` (JS rendering) — ads are JS-injected and absent from
+  static HTML.
+
+```json
+{"target":"google_ads","query":"myers briggs test","geo":"United States",
+ "device_type":"desktop","page_count":1,"parse":true,"headless":"html"}
+```
+
+Real run caught `mytraitprofile.com` and `mindprofile.co` (infringers) plus
+`mbtionline.com` (own/partner). Remaining misses are **real ad-inventory
+variance** (low-competition term+geo genuinely has no live ads), mitigated by
+broad keywords + repeat sampling. Further levers: `device_type: mobile`,
+city-level geo.
+
+## Targets / search engines
+
+`google_search`, `google_ads`, `google_ai_mode`, `bing_search`, plus Amazon,
+Walmart, Target, YouTube, Reddit, TikTok, ChatGPT, Perplexity. For SERP ad
+monitoring use **`google_ads`**; `bing_search` for Bing (its parsed ad-field
+shape is not yet validated here).
+
+## Cost note — google_ads + render is pricier
+
+`google_ads` + `headless:html` uses premium pool + browser rendering, so it costs
+**more than plain google_search**. The free $1 budget covers fewer requests at
+this tier. Confirm the exact per-request price for this combination in the
+dashboard before forecasting.
 
 ## Pricing
 
