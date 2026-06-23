@@ -120,3 +120,20 @@ $1.50/1k** on the free plan. Paid plans lower this toward ~$1.00-1.20/1k. The fr
 plan = **$1** of usage ≈ **666 requests** at $1.50/1k. Rate limit 10 req/s (free).
 
 Cost ≈ `(countries × keywords) / 1000 × 1.50`.
+
+## Public/dashboard API (api.decodo.com) — separate key, NOT the scraper Basic auth
+
+The dashboard "Public API" is a **different** surface from the scraper API and uses
+the **Account → API Keys** hex key (the `scraping-automation` key — the same one
+that fails against `/v2/scrape`). Stored as `public_api_key` in `~/GitHub/.tokens/decodo`.
+
+- **Auth:** send the key **raw** in the header — `Authorization: <key>` (NOT `Bearer`,
+  NOT `Token`; those return `401 {"detail":"Invalid Api key provided"}`).
+- Base: `https://api.decodo.com`. Useful endpoints (all GET unless noted):
+  - `/v2/subscriptions` → list subscriptions (residential proxies: `traffic_limit` GB, `traffic` used GB, `valid_from/until`, `service_type`).
+  - `/v2/sub-users` → proxy sub-users.
+  - `POST /api/v2/statistics/traffic` (body: `proxyType`, `startDate`, `endDate`, `groupBy`) → usage; `proxyType` must match a subscription you own (`rtc_universal_proxies`/`..._core_proxies`), else `400 "Client has no … subscriptions"`.
+- **Gotcha:** this API is entirely **bandwidth/proxy-oriented**. There is **no Web
+  Scraping API "requests remaining/limit" endpoint** — scrape requests don't even
+  register against residential `traffic`. So for a request-count budget, track usage
+  yourself (sum `requests_made` across runs); the app does this against an admin-set pool.
