@@ -100,8 +100,15 @@ city-level geo.
 
 `google_search`, `google_ads`, `google_ai_mode`, `bing_search`, plus Amazon,
 Walmart, Target, YouTube, Reddit, TikTok, ChatGPT, Perplexity. For SERP ad
-monitoring use **`google_ads`**; `bing_search` for Bing (its parsed ad-field
-shape is not yet validated here).
+monitoring use **`google_ads`**.
+
+**Bing ads NOT supported (validated 2026-06-23).** `bing_search` (parse:true,
+headless:html) returns **only `organic`** — no `paid`/`ads`/`pla` section at all,
+even for guaranteed-ad queries like "car insurance". There is **no `bing_ads`
+target** equivalent to `google_ads` (the alternate `bing` target uses a different
+param schema and 400s on the SERP payload; it's not an ads endpoint either).
+Surfacing Bing ads would require custom-parsing the rendered HTML (fragile) — not
+worth it. The app's engine selector was removed; Google-only.
 
 ## Pricing (confirmed from dashboard 2026-06-23, per 1k requests)
 
