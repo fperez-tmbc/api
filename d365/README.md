@@ -549,6 +549,41 @@ AU/SG users have roles assigned to specific company codes via `SecurityUserRoleO
 
 ---
 
+## Licensing — D365 F&O licenses live in the D365 tenant, not corporate
+
+The D365 F&O licenses (`DYN365_FINANCE`, `Dynamics_365_Finance_Premium`, `DYN365_SCM`, `DYN365_SCM_ATTACH`, etc.) are **not** assigned to the user's corporate `@themyersbriggs.com` account in the corporate tenant (`d5c15341`). That account holds only standard M365 SKUs (Business Premium, Teams, Phone, Power BI, …). Looking there for a "D365 license to remove" finds nothing.
+
+The D365 license is assigned to the user's **guest** object in the **D365 tenant** (`43ca37ec`), where the UPN looks like `cfrost_themyersbriggs.com#EXT#@themyersbriggs.onmicrosoft.com` (`userType: Guest`). The Dynamics SKUs are owned by that tenant's subscriptions.
+
+`az` (signed in as `2fperez@themyersbriggs.com`) can get a Graph token for the D365 tenant directly — no separate login:
+
+```bash
+TOK=$(az account get-access-token --tenant 43ca37ec-5cc6-4dc3-a1ee-ad4ccede8a02 \
+  --resource "https://graph.microsoft.com" --query accessToken -o tsv)
+```
+
+To find a corporate user's D365 license: search the D365 tenant by `mail` (not UPN — the UPN is the `#EXT#` form), then read `licenseDetails`:
+
+```bash
+# resolve guest object id by corporate email
+GET https://graph.microsoft.com/v1.0/users?$filter=mail eq 'cfrost@themyersbriggs.com'&$select=id,userPrincipalName,userType
+# list its licenses
+GET https://graph.microsoft.com/v1.0/users/{id}/licenseDetails
+# check direct vs group-based:
+GET https://graph.microsoft.com/v1.0/users/{id}?$select=licenseAssignmentStates   # assignedByGroup=null => direct
+```
+
+To remove (direct assignments), POST `assignLicense` with the skuIds:
+
+```bash
+POST https://graph.microsoft.com/v1.0/users/{id}/assignLicense
+{ "addLicenses": [], "removeLicenses": ["<skuId1>","<skuId2>"] }   # HTTP 200 on success
+```
+
+Resolve skuId↔name via `GET /subscribedSkus?$select=skuId,skuPartNumber` **against the D365 tenant** (the SKU set differs from corporate). Confirmed 2026-06-25 on ticket 101375 — removed Finance + SCM_ATTACH from 7 sales users' guest accounts (all directly assigned). `DYN365_SCM_ATTACH` was a fully-consumed pool (45/45).
+
+---
+
 ## OData Query Patterns
 
 ```bash
