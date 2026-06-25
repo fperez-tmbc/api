@@ -102,8 +102,8 @@ BASE="https://prtg.themyersbriggs.com/api"
 # All down sensors (status 5)
 curl -sk "${BASE}/table.json?content=sensors&output=json&filter_status=5&columns=objid,name,device,message&count=2500&apitoken=${TOKEN}" | python3 -m json.tool
 
-# Down acknowledged (status 14)
-curl -sk "${BASE}/table.json?content=sensors&output=json&filter_status=14&columns=objid,name,device&count=2500&apitoken=${TOKEN}" | python3 -m json.tool
+# Down acknowledged (status 13 — NOT 14; see status table note)
+curl -sk "${BASE}/table.json?content=sensors&output=json&filter_status=13&columns=objid,name,device&count=2500&apitoken=${TOKEN}" | python3 -m json.tool
 
 # Find by name (substring)
 curl -sk "${BASE}/table.json?content=sensors&output=json&filter_name=@sub(<term>)&columns=objid,name,device,status&apitoken=${TOKEN}" | python3 -m json.tool
@@ -128,7 +128,10 @@ curl -sk "${BASE}/table.json?content=devices&output=json&id=<groupid>&columns=ob
 | 10 | Unusual |
 | 11 | Not Licensed |
 | 12 | Paused Until |
-| 14 | Down Acknowledged |
+| 13 | **Down (Acknowledged)** — this is the acknowledged-down code (confirmed in 25.1.x) |
+| 14 | Down (Partial) |
+
+> ⚠️ **Acknowledged-down is status 13, not 14.** Earlier notes here had 14 mislabeled as "Down Acknowledged" — that's actually "Down (Partial)". When checking for outages, query **status 5 (Down) AND 13 (Down Acknowledged)**; an acknowledged-down server still shows nothing under `filter_status=5`. Safest is to pull all sensors and bucket by `status_raw` rather than trust a single filter.
 
 ## Columns for table.json
 
