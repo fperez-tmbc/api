@@ -584,6 +584,30 @@ Resolve skuId↔name via `GET /subscribedSkus?$select=skuId,skuPartNumber` **aga
 
 ---
 
+## Internal (onmicrosoft) accounts — Financial Reporting Report Designer workaround
+
+**Why these accounts exist.** Every TMBC D365 user signs in as a **guest** (corporate `@themyersbriggs.com` federated into the D365 tenant as `..._themyersbriggs.com#EXT#@themyersbriggs.onmicrosoft.com`). Microsoft confirmed a **by-design limitation, Bug ID 799184** (MS case TrackingID#2604160040007593, soft-closed 2026-05): the **Financial Reporting Report Designer** (Management Reporter desktop client) **fails to launch when authenticated with a guest/external account** — "There was a problem communicating with the server" — but works with an **internal/local tenant account** holding identical permissions. DataMart reset and permission changes don't fix it; no product fix is coming. MS's recommended workaround is to create affected users as **internal members in the customer's own Entra tenant**.
+
+So affected users get a **second, internal account**: `<alias>@themyersbriggs.onmicrosoft.com` (userType **Member**), separately licensed, used to launch Report Designer. The person's day-to-day work can stay on their guest account. **Cost caveat:** the internal account needs its own D365 license, so the user counts as **two licenses** — Finance alone covers Financial Reporting, so an internal account used *only* for Report Designer needs just Finance (the attach/HR/ProjOps SKUs are unneeded duplication). Root cause is D365 F&O living in a separate tenant from corporate; tenant consolidation is the real fix.
+
+**Precedent accounts:** `nperrone@…onmicrosoft.com` (Nick Perrone) + F&O user `nperrone1`. The onmicrosoft F&O user is a **role-for-role copy of the person's corporate F&O user** (verified `nperrone` vs `nperrone1`: identical role sets).
+
+### Procedure (confirmed 2026-06-25, ticket 101364 — Tracey Skates)
+
+1. **Create the Entra member account** (D365 tenant, Graph — `az account get-access-token --tenant 43ca37ec...`):
+   ```
+   POST https://graph.microsoft.com/v1.0/users
+   { "accountEnabled": true, "displayName": "Tracey Skates", "mailNickname": "tskates",
+     "userPrincipalName": "tskates@themyersbriggs.onmicrosoft.com", "usageLocation": "<actual country, e.g. GB>",
+     "passwordProfile": { "password": "<temp>", "forceChangePasswordNextSignIn": true } }
+   ```
+   `mailNickname` + `passwordProfile` are required by the API. Set `usageLocation` to the user's **actual** country (not necessarily Nick's US) — it's required before licensing.
+2. **Assign licenses** base-then-attach (two `POST /users/{id}/assignLicense` calls): bases (Finance, HR) first, then attaches (SCM_ATTACH, Project_Operations_Attach). Mirror the person's existing guest licenses, or Finance-only if scoping to Report Designer.
+3. **Create the F&O user** `<UserID>1` (e.g. `TSkates1`) in PROD — see the create payload under "Create a user via OData". Key fields: `Alias`/`Email` = the onmicrosoft UPN; **`NetworkDomain` = `https://sts.windows.net/`** (no suffix — required so F&O binds to the onmicrosoft identity; the corporate guest user uses `…/themyersbriggs.com/`); `Company` = the person's own company (Tracey = `3100`, the UK entity); `AccountType` ClaimsUser; `en-us`. D365 auto-assigns SYSTEMUSER.
+4. **Mirror roles** from the person's existing corporate F&O user: read their enabled `SecurityUserRoleAssociations`, POST each to the new user (skip SYSTEMUSER, already present). Tracey's 64 enabled roles were all global (zero `SecurityUserRoleOrganizations`). The role that actually matters for Report Designer is **Management Reporter designer (TMBC)** (`CPP_MRDESIGNER`).
+
+---
+
 ## OData Query Patterns
 
 ```bash
