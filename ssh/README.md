@@ -51,6 +51,8 @@ SSHPASS="$PASS" sshpass -e /c/Windows/System32/OpenSSH/ssh.exe -o StrictHostKeyC
 
 **Windows sshpass gotcha:** The WinGet sshpass binary (`/c/Users/.../WinGet/Links/sshpass`) is Win32-native and cannot hook into Git Bash's POSIX SSH (`/usr/bin/ssh`). Always point it at the Windows OpenSSH binary: `/c/Windows/System32/OpenSSH/ssh.exe`. Use `SSHPASS="$PASS" sshpass -e` (env var) rather than `-p` — more reliable across platforms.
 
+**Windows askpass GUI-popup gotcha:** When MSYS `/usr/bin/ssh` needs a password but has no interactive TTY (e.g. run from an automation/tool shell) and sshpass isn't injecting, ssh falls back to `SSH_ASKPASS` — which Git for Windows sets to `/mingw64/bin/git-askpass.exe` with `DISPLAY` pre-defined (`needs-to-be-defined`). This pops a **GUI dialog titled "Git for Windows"** on the user's desktop reading `<user>@<host>'s password:` — it looks like a rogue Git credential prompt but it's actually ssh asking for the SSH password. Two fixes, use both: (1) use the Windows OpenSSH binary + `SSHPASS=... sshpass -e` per the gotcha above so the password is injected and the fallback never fires; (2) always prefix Windows ssh calls with `SSH_ASKPASS_REQUIRE=never DISPLAY=` so ssh can never spawn the GUI helper — it fails fast on the terminal instead of popping a dialog on Frank's screen. Confirmed 2026-06-27 (svcclaude → SVVEEAMAVS01).
+
 **UPN usernames:** Windows domain hosts often require UPN format (`user@domain`) rather than bare username. Use `-l "svcclaude@cpp-db.com"` — do NOT combine as `user@host` since the `@` in the username confuses SSH host parsing.
 
 ---
@@ -213,6 +215,16 @@ sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no svcclaude@TARGET \
 
 **Why:** `powershell -` reading from stdin silently fails through SSH — PowerShell gets no input and exits with no output and no error. `-EncodedCommand` is argument-based and works reliably.
 
+### Windows: Veeam B&R v13 cmdlets require PowerShell 7 (not 5.1)
+
+The Veeam B&R **v13** PowerShell module (`Veeam.Backup.PowerShell`) has `PowerShellVersion = 7.0` in its manifest. Invoking it from Windows PowerShell 5.1 (the default `powershell` over SSH) fails: the module "imports" but exposes **0 cmdlets** (`Connect-VBRServer`/`Get-VBRJob` "not recognized", `[Veeam.Backup.Core.CBackupSession]` type not found). Invoke `pwsh` (PowerShell 7, at `C:\Program Files\PowerShell\7\pwsh.exe`) instead — it also accepts `-EncodedCommand`. Confirmed on SVVEEAMAVS01 (Veeam 13.0.1.180), 2026-06-27.
+
+```bash
+# Veeam v13 read-only query over SSH (svcclaude is local admin on SVVEEAMAVS01):
+ssh ... "pwsh -NonInteractive -NoProfile -EncodedCommand $ENCODED"
+# inside the script: Import-Module Veeam.Backup.PowerShell; Connect-VBRServer -Server localhost; ...
+```
+
 ---
 
 ## Known Hosts in the Environment
@@ -239,5 +251,7 @@ sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no svcclaude@TARGET \
 | PowerShell via SSH returns nothing | Stdin pipe to `powershell -` doesn't work | Use `-EncodedCommand` with base64-encoded script |
 | `Connection refused` | SSH not running or wrong port | Check if host needs PsExec access first; see psexec README |
 | sshpass sends password but server still rejects | WinGet sshpass can't hook Git Bash SSH PTY | Use `/c/Windows/System32/OpenSSH/ssh.exe` explicitly; use `SSHPASS=... sshpass -e` |
+| GUI dialog titled "Git for Windows" pops asking for `<user>@<host>'s password` | MSYS ssh fell back to `SSH_ASKPASS=git-askpass.exe` (no TTY + sshpass not injecting) | Prefix ssh with `SSH_ASKPASS_REQUIRE=never DISPLAY=`; also use Windows OpenSSH binary + `SSHPASS=... sshpass -e` |
+| Veeam v13 cmdlets "not recognized" after Import-Module | Veeam B&R v13 module needs PowerShell 7 | Invoke `pwsh` not `powershell` over SSH |
 | sshpass password rejected on domain account | Bare username rejected; UPN required | Use `-l "user@domain"` not `user@host`; confirmed on svazadsyncdc01 |
 | Sudo prompts for password over SSH | No TTY allocated | Add `-t` flag to allocate a pseudo-TTY |
