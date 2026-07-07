@@ -187,6 +187,33 @@ EOF
 
 ---
 
+## Device Certificate (CDSS)
+
+PAN device certificates are required for Cloud-Delivered Security Services (Threat Prevention, WildFire, URL Filtering, DNS Security, etc.). A missing/expired cert silently degrades those features. Certs are ~90-day and auto-renew while the device can reach PAN's cert cloud.
+
+### Check status (API op — read-only)
+
+```
+type=op  cmd=<show><device-certificate><status></status></device-certificate></show>
+```
+
+Returns `Device certificate not found`, or `<validity>Valid</validity>` with `not_valid_after`.
+
+### Install / fetch with OTP
+
+- Correct command: `request certificate fetch otp <OTP>`
+  - XML op: `<request><certificate><fetch><otp>OTP</otp></fetch></certificate></request>`
+- **Gotcha:** `<fetch><pan-device-certificate>OTP</...>` is REJECTED on 11.2.x ("unexpected here"). The child element is `<otp>`, not `pan-device-certificate`.
+- OTP is generated per-serial in the CSP: **Products → Device Certificates → Generate OTP → PAN-OS type**. 60-minute lifetime; the firewall makes **one** fetch attempt — if it fails, the OTP is spent and you regenerate. (A local XML syntax error does NOT consume the OTP — the job never runs.)
+- **Per device, per HA peer** — device certs are NOT synced across an HA pair; fetch on each peer with its own OTP.
+- **No commit and no failover** — management-plane fetch, installs instantly; safe on live HA pairs.
+- Returns a job (`Device-certificate-fetch`); poll `<show><jobs><id>JOBID</id></jobs></show>` until `FIN`/`OK`. PA-220 (10.2.x) takes ~20–60s; PA-VM / Panorama / PA-460 are near-instant.
+- Verify with the status op above (`<validity>Valid</validity>`).
+
+_Fleet baseline 2026-07-07: all 9 devices carry valid device certs (AVS/AU/FR/Panorama fetched this date, WH pair already valid). Tied to PAN case 04101798._
+
+---
+
 ## Software Management
 
 ### Downloads and version listing (API)
