@@ -446,15 +446,20 @@ curl -s -G "${BASE_URL}/data/SystemUsers" \
 
 User IDs follow a first-initial + last-name pattern, truncated to ~8 characters (e.g., `jsmith`, `csamwort`, `swhitema`). PROD and UAT use the same user IDs.
 
-### Direct key lookup for SystemUsers
+### Direct key lookup for SystemUsers — `$filter` and `contains()` are BOTH unreliable
 
-`$filter=UserId eq '<id>'` is unreliable on the `SystemUsers` entity — it returns empty results even when the user exists. Use the direct key form instead:
+`$filter` on the `SystemUsers` entity is broadly unreliable — it returns empty results (no error) even when the record exists. This is **not** limited to `UserId eq`: confirmed 2026-07-07 that `Alias eq '<email>'`, an `or` of two `Alias eq`, and `contains(UserName,'<name>')` / `contains(Alias,'<frag>')` all silently returned zero matches for users that verifiably exist (the same `contains(UserName,'Thuy')` missed a known-present user). Treat **any** `$filter`/`contains` result on `SystemUsers` as untrustworthy.
+
+**The only reliable lookup is the direct composite key** (case-insensitive, so `AMahmood` == `amahmood`). A 404 genuinely means absent; a 200 genuinely means present:
 
 ```bash
 curl -s "${BASE_URL}/data/SystemUsers('jsmith')" \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Accept: application/json"
+# 200 = exists (read UserID/Alias/Email/Enabled from body); 404 = absent
 ```
+
+If you don't know the exact UserID, probe likely forms by direct key (`AXxxxx`, first-initial+lastname, etc.) rather than trusting a `$filter`/`contains` scan. `SecurityUserRoles`, by contrast, **does** support `$filter=UserId eq '<id>'` reliably — the unreliability is specific to `SystemUsers`.
 
 ### Enable / disable a user account
 
