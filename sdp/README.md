@@ -174,6 +174,8 @@ Use `PUT /requests/{internal_id}/close` with this as `input_data`.
 
 **The close endpoint only accepts `closure_info`.** Passing `resolution`, `category`, `subcategory`, or any other field returns `4001 EXTRA_KEY_FOUND_IN_JSON`. To set those fields when closing a ticket, make two separate calls: first `PUT /requests/{id}` to update category/subcategory/resolution, then `PUT /requests/{id}/close` with only `closure_info`.
 
+**A technician must be assigned before closing.** If the ticket has no technician, `PUT /requests/{id}/close` returns `status: warning`, top-level `status_code: 3000`, with a nested `messages[]` entry `status_code: 4003, type: warning, fields: ["technician"]` — and the ticket stays Open (the close is rejected, not partial). Assign one first via `PUT /requests/{id}` with `"technician": {"email_id": "..."}` (category + subcategory still required on that PUT), then re-run the close. Confirmed on ticket 101443 (2026-07-16).
+
 **Required before closing:** category, subcategory, and resolution must all be set. Use a single `PUT /requests/{id}` call to set all three before calling the close endpoint:
 
 ```json
