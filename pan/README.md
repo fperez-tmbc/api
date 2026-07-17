@@ -329,64 +329,12 @@ Anti-Virus `Mismatch` after upgrade is normal (content version difference) and d
 
 ## Disk Cleanup (PA-220 / PAN-OS 10.2.x)
 
-### Show disk usage
-```
-show system pancfg-directory-usage
-```
-
-### debug pancfg-directory-usage clean — full syntax
-
-```
-debug pancfg-directory-usage clean config saved <filename>
-debug pancfg-directory-usage clean dynamic-updates anti-virus update <filename>
-debug pancfg-directory-usage clean dynamic-updates content update <filename>
-debug pancfg-directory-usage clean software-images version <version>
-```
-
-- Filenames require tab-completion on an interactive SSH session — not discoverable via API or non-interactive SSH
-- `dynamic-updates` subcommands operate on downloaded `.tgz` files in `mgmt/av-images` and `mgmt/content-images` only — NOT on the extracted packages in `updates/oldav` / `updates/oldcontent`
-- `software-images version 10.2.0` is blocked ("Can't purge base image") while 10.2.18-h1 is installed — base image is always protected
-- `debug software disk-usage cleanup deep threshold 90` errors on PA-220 10.2.x
-- `debug software disk-usage aggressive-cleaning enable` — valid command but confirmation prompt reads from `/dev/tty`; must be answered interactively (`y`)
-
-### What can be cleaned non-interactively
-```bash
-# Delete debug log files (SSH heredoc)
-delete debug-log mp-log file *.1
-delete debug-log mp-log file *.2
-delete debug-log mp-log file *.3
-delete debug-log mp-log file *.4
-delete debug-log mp-log file *.old
-
-# Delete a specific downloaded content package (SSH) — also auto-purges corresponding oldcontent dir
-delete content update panupv2-all-contents-<version>.tgz
-
-# Delete a specific downloaded AV package (SSH)
-delete anti-virus update panup-all-antivirus-<version>.tgz
-
-# Clear old content cache (API op or SSH)
-delete content cache old-content
-```
-
-### What requires interactive SSH (tab-completion to find filenames/versions)
-- `debug pancfg-directory-usage clean config saved <TAB>` — old saved configs (~41M on AU)
-- `debug pancfg-directory-usage clean dynamic-updates anti-virus update <TAB>` — old downloaded AV .tgz packages
-- `debug pancfg-directory-usage clean dynamic-updates content update <TAB>` — old downloaded content .tgz packages
-- `delete global-protect-client image <TAB>` / `delete global-protect-client version <TAB>` — old GP client images (~551M)
-- `debug software disk-usage aggressive-cleaning enable` → confirm `y`
-
-### content-preview disk accumulation (PAN-300055)
-Known bug: firewall accumulates large content-preview directories in `/opt/pancfg/mgmt/content-preview/<version>/` when an error occurs during content update cleanup. Normal size is ~19M per version; bug leaves behind 1GB+.
-- `delete content preview <version>` — Invalid syntax on 10.2.x
-- `delete content update <filename.tgz>` — removes the downloaded package but does NOT clear the preview directory
-- Config xpath `/config/shared/content-preview` exists but does not contain version-specific entries — config delete won't help
-- PAN-300055 not fixed in 10.2.18-h1 — watch future hotfix release notes
-- Workaround: none found via non-interactive SSH; may require interactive session or TAC
-
-### Non-deletable items
-- `updates/oldav` and `updates/oldcontent` — extracted previously-installed packages; system-managed, not removable by user commands
-- `updates/curav` and `updates/curcontent` — currently active packages
-- Base software image (10.2.0) — protected while current version is installed
+> **Moved to the knowledge-base repo:** `knowledge-base/procedures/pan-pa220-disk-cleanup.md`
+>
+> Full PA-220 disk-space troubleshooting lives there — `show system pancfg-directory-usage`,
+> what's reclaimable non-interactively (superseded content/AV `.tgz`, debug logs) vs. what isn't
+> (`oldcontent`/`oldav`, base image, the PAN-300055 `content-preview` bug), plus the frpan01
+> worked example (2026-07-16).
 
 ## Known Panorama Behaviors
 
