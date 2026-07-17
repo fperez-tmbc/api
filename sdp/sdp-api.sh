@@ -78,7 +78,10 @@ refresh_token() {
   fi
 
   local response http_status tmpfile
-  tmpfile=$(mktemp /tmp/sdp_token_XXXXXX.json)
+  # Trailing X's only — BSD/macOS mktemp does not randomize X's followed by a
+  # suffix (e.g. sdp_token_XXXXXX.json), so it would create a literal file that
+  # collides on the next run if an interrupted run skipped the cleanup rm.
+  tmpfile=$(mktemp /tmp/sdp_token.XXXXXX)
 
   http_status=$(curl -sS -w "%{http_code}" -o "$tmpfile" \
     -X POST "$(zoho_oauth_url)" \
@@ -135,7 +138,8 @@ sdp_call() {
   shift 2
   local url tmpfile http_status
   url="$(sdp_base_url)${endpoint}"
-  tmpfile=$(mktemp /tmp/sdp_resp_XXXXXX.json)
+  # Trailing X's only — see refresh_token for the BSD mktemp rationale.
+  tmpfile=$(mktemp /tmp/sdp_resp.XXXXXX)
 
   http_status=$(curl -sS -w "%{http_code}" -o "$tmpfile" \
     -X "$method" "$url" \

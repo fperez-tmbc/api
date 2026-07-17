@@ -619,6 +619,16 @@ On the TMBC VM (`2fperez`), this is already set up with Python 3.13 at the path 
 
 ---
 
+### macOS: stale `sdp_token`/`sdp_resp` temp file blocks all calls (`INVALID_TICKET`)
+
+If every call suddenly returns `{"status_code":4001,"message":"INVALID_TICKET"}` and the shell shows `mktemp: mkstemp failed on /tmp/sdp_token_XXXXXX.json: File exists`, a prior **interrupted** run left a literal temp file behind and `refresh_token` never got a token (so calls run unauthenticated).
+
+Root cause: BSD/macOS `mktemp` only randomizes trailing `X`'s. The old templates were `sdp_token_XXXXXX.json` / `sdp_resp_XXXXXX.json` — the `.json` suffix after the `X`'s made mktemp create a **literal** file `sdp_token_XXXXXX.json`, which collides on the next run if the cleanup `rm` was skipped (e.g. Ctrl-C mid-call). Fixed 2026-07-16 by moving the `X`'s to the end (`sdp_token.XXXXXX`, `sdp_resp.XXXXXX`) in `sdp-api.sh` — portable across GNU (Git Bash VM) and BSD (Mac).
+
+Recovery if you hit an old leftover: `rm -f /tmp/sdp_token_XXXXXX.json /tmp/sdp_resp_XXXXXX.json` (literal names — quote them so zsh's `nomatch` doesn't abort the line).
+
+---
+
 ### API responses contain literal newlines inside JSON strings — use `strict=False`
 
 The SDP API returns JSON with literal (unescaped) newline characters embedded inside string values (most often in `description` fields). This is technically invalid JSON. Python's `json.loads()` rejects it by default.
