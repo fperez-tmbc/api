@@ -175,15 +175,29 @@ cmd=<request><global-protect-client><software><info/></software></global-protect
 
 ### Delete an old GP client version (SSH only)
 
+**Usually unnecessary — `activate` auto-purges the prior version.** After activating a new
+GP client version, the previously-active one is removed automatically; its API `downloaded`
+flag flips to `no` within a few minutes (it can briefly still read `yes` right after activate —
+that's API lag, not a failure). An explicit delete then reports
+`No images match '['gpclient', '<ver>']' for purging` or `Server error : <ver> does not exist`
+because there is nothing left to purge — expected, not an error.
+(Verified fleet-wide 2026-07-16 upgrading c1016 → c1105: all 8 firewalls auto-purged c1016.)
+
+If you do need to remove one that's genuinely still present:
+
 ```bash
-ssh svcclaude@<host> << 'EOF'
-delete global-protect-client version 6.3.3-c915
-exit
-EOF
+# MUST be heredoc / piped stdin — `ssh host "delete ..."` returns empty and does NOT execute.
+printf 'set cli pager off\ndelete global-protect-client version 6.3.3-c915\nexit\n' \
+  | ssh -i ~/GitHub/.tokens/svcclaude-key <opts> svcclaude@<host>
 ```
 
 - No confirmation prompt — the `y` is not needed and will cause "Unknown command: y"
-- Verify with `info` after: `downloaded` should change to `no`
+- Verify with `info` after: `downloaded` should be `no`
+- **PAN-OS SSH:** operational commands only run via heredoc/stdin, never as `ssh host "cmd"`.
+- **zsh gotcha:** don't stuff flags into a scalar and run `ssh $SSH_OPTS ...` — zsh does NOT
+  word-split unquoted scalars, so the entire string lands in `-i` ("Identity file … not
+  accessible" → "Too many authentication failures"). Use a zsh array
+  (`opts=(-o A -o B …); ssh -i KEY "${opts[@]}" …`) or inline every flag.
 
 ---
 
@@ -234,6 +248,10 @@ type=op  cmd=<request><system><software><download><version>11.2.10-h8</version><
 ### Install, delete, reboot (SSH only — not exposed via API)
 
 Use key-based SSH with stdin heredoc. On PAN-OS 10.2.x, always add `-o IdentitiesOnly=yes -o IdentityAgent=none -o PubkeyAcceptedAlgorithms=rsa-sha2-256` to avoid "Too many authentication failures" from the agent offering extra keys.
+
+> **zsh warning:** the `SSH_OPTS="…"; ssh $SSH_OPTS …` form below word-splits correctly in bash
+> but NOT in zsh (Claude Code's shell). Under zsh the whole string collapses into the `-i` value
+> and auth fails. Use `ssh ${=SSH_OPTS} …`, a `opts=(…)` array with `"${opts[@]}"`, or inline the flags.
 
 ```bash
 SSH_OPTS="-i ~/.tokens/svcclaude-key-rsa -o StrictHostKeyChecking=no -o PasswordAuthentication=no \
