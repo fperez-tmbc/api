@@ -526,9 +526,29 @@ Scope required: `SDPOnDemand.users.ALL`
 | Operation | Method | Endpoint |
 |-----------|--------|----------|
 | List requesters | GET | `/requesters` |
+| Create requester | POST | `/requesters` |
 | Delete requester | DELETE | `/requesters/{requester_id}` |
 
 Deletion use case: after migrating from on-prem SDP to SDP Cloud, legacy user accounts that have no Entra ID identity cannot be deleted through the UI. Use the API to delete them.
+
+#### Create requester payload (undocumented; discovered by probing)
+
+Wrapper key is `requester` (singular).
+
+```json
+{
+  "requester": {
+    "name": "Taras Ozarko",
+    "first_name": "Taras",
+    "last_name": "Ozarko",
+    "email_id": "tozarko@softjourn.com"
+  }
+}
+```
+
+**Required fields:** `first_name` and `last_name`. Posting only `name` + `email_id` returns `4000` with a nested `4012` on `first_name`. `name` is the display name; site defaults to Base Site automatically.
+
+**Use case — external collaborators emailing in.** SDP does **not** auto-create a requester from an allowed-domain email; if the sender isn't a known requester, the incoming mail is silently dropped (no ticket). Manually creating the requester makes the sender trusted so their email files as a ticket — this bypasses the spam filter the same way an allowed domain would. Confirmed 2026-07-17: `@softjourn.com` was excluded from the email spam block but Taras's mail still created no ticket until his requester account existed. Pattern mirrors the pre-existing `matthew@d365solutions.net` external requester. Note: the requester's **earlier** dropped email is not recovered retroactively — they must resend after the account is created.
 
 ---
 
