@@ -114,3 +114,53 @@ Note: `-J` ProxyJump uses the local key for the second hop — no password neede
 Even with svcclaude in local Administrators, the SSH session token is **not elevated** by default (UAC). Commands requiring elevation (gpresult, schtasks /create as SYSTEM, etc.) will return exit code 5 (Access Denied) via SSH.
 
 **Workaround:** Use PsExec with `-s` to run as SYSTEM (fully elevated), or use `schtasks /create /ru SYSTEM` via PsExec.
+
+## FIRST: prefer direct password SSH — you usually do NOT need PsExec (learned 2026-07-18)
+
+svcclaude is added to the target's **local Administrators** group before you troubleshoot it, and a **direct password SSH session comes back elevated** (High Mandatory Level). It can read `CBS.log`/`C:\Config.Msi`, run `DISM`/servicing, rename `catroot2`, launch `setup.exe`, etc. — with commands returning **stdout directly**, no double-hop, no `net use`, no EncodedCommand. So **reach for direct SSH first; reserve PsExec for the rare true-SYSTEM-only need.** Do NOT try key auth (keys aren't distributed) — password only. See [[feedback-ssh-pw-fallback]].
+
+```bash
+export SSHPASS=$(grep '^PASSWORD=' ~/GitHub/.tokens/svcclaude | cut -d= -f2-)
+sshpass -e ssh -o StrictHostKeyChecking=no \
+  -o ProxyCommand="sshpass -e ssh -o StrictHostKeyChecking=no -W %h:%p svcclaude@svpdqhq01.cpp-db.com" \
+  svcclaude@TARGET.cpp-db.com "dism /online /cleanup-image /checkhealth"
+```
+
+(The elevation note that used to say "SSH sessions aren't elevated" was wrong for svcclaude here.)
+
+## If you DO use PsExec: Diagnostics That Write Output Files (learned 2026-07-18)
+
+Fallback pattern for the rare true-SYSTEM case — "run a PowerShell diagnostic on the target and read the result back," across the double-hop:
+
+1. **Don't stage a `.ps1` on the target.** `scp` from Mac → jump host **fails silently** (Windows OpenSSH path quirk), so the file isn't there to copy onward. Instead pass the script inline with `powershell -EncodedCommand <base64 UTF-16LE>`:
+   ```bash
+   ENC=$(iconv -f UTF-8 -t UTF-16LE script.ps1 | base64 | tr -d '\n')
+   sshpass -p "$PASS" ssh svcclaude@svpdqhq01.cpp-db.com \
+     "psexec \\\\TARGET -u CPP-DB\\svcclaude -p $PASS -h -accepteula powershell -NonInteractive -NoProfile -EncodedCommand $ENC"
+   ```
+   **`-EncodedCommand` has an ~8191-char command-line limit.** If the base64 exceeds it, split the script into 2+ runs that append to the same output file.
+
+2. **Have the script write output to `C:\Temp\out.txt` (not `C:\Windows\Temp`)** and end it with `icacls C:\Temp\out.txt /grant *S-1-1-0:R | Out-Null` (grants Everyone read).
+
+3. **Read it back via `net use` over the C$ share** (the double-hop otherwise = "Access is denied"):
+   ```bash
+   sshpass -p "$PASS" ssh svcclaude@svpdqhq01.cpp-db.com \
+     "net use \\\\TARGET\\C\$ /user:CPP-DB\\svcclaude \"$PASS\" >nul 2>&1 & type \\\\TARGET\\C\$\\Temp\\out.txt & net use \\\\TARGET\\C\$ /delete >nul 2>&1"
+   ```
+
+### Gotchas behind that pattern
+- **Double-hop:** the jump-host SSH session has **no network credentials** to the target's `C$` — plain `copy`/`type \\TARGET\C$\...` returns **"Access is denied."** Always `net use \\TARGET\C$ /user:CPP-DB\svcclaude "$PASS"` first. If it still fails, the box has **persistent (remembered) connections** — prepend `net use \\TARGET\C$ /delete /y` to clear a stale/conflicting session, then reconnect with `/persistent:no`.
+- **SYSTEM (`-s`) output files are unreadable by the `net use` (svcclaude) session** → "Access is denied" on read-back. Fix: run the diagnostic with **`-h`** (elevated svcclaude, so the file is svcclaude-owned) *or* have the script `icacls ... /grant *S-1-1-0:R`. Use `-s` only when the task truly needs SYSTEM (renaming `catroot2`/`SoftwareDistribution`, deleting `C:\Config.Msi\*`, reading `C:\$WINDOWS.~BT`).
+- **`psexec ... cmd /c type file` truncates stdout** (often only the first line comes back). Don't read files through PsExec stdout — use the `net use` + `type` read above.
+- **Rapid back-to-back SSH connections to the jump host get `Permission denied (publickey,password,keyboard-interactive)`** — a throttle, not a credential failure. Space connections out (a few seconds) and it recovers.
+
+## Long-Running Remote Operations (detached + poll)
+
+For anything long (DISM `/RestoreHealth`, `sfc`, `setup.exe /auto Upgrade`, `rd /s /q C:\Windows.old`, large downloads), **launch detached and poll a done-marker** — the operation then runs server-side and survives connection drops / local background-task reaping:
+```bash
+# launch (script ends by writing C:\Temp\<name>_done.txt)
+psexec \\TARGET -u CPP-DB\svcclaude -p $PASS -s -d -accepteula powershell ... -EncodedCommand $ENC
+# poll (spaced ~90-120s):
+net use \\TARGET\C$ ... & if exist \\TARGET\C$\Temp\<name>_done.txt (type ...) else (echo NOTYET) & net use ... /delete
+```
+`-d` returns immediately with the PID; the process keeps running. Capture DISM's real exit code with `$r = & dism ... 2>&1; $ec = $LASTEXITCODE` — **not** `$LASTEXITCODE` after a `| Out-File` pipeline (that captures Out-File's code, always 0).
