@@ -4,7 +4,7 @@
 
 ### `igraph` — use this for all Intune/Graph API tasks
 
-The `igraph` CLI wrapper in this folder handles auth automatically using the `claude-exo`
+The `igraph` CLI wrapper in this folder handles auth automatically using the `claude-m365`
 certificate-based app registration. Use it instead of `az rest` or raw curl.
 
 ```bash
@@ -28,18 +28,24 @@ BETA = "https://graph.microsoft.com/beta"
 r = requests.get(f"{BETA}/deviceManagement/deviceManagementScripts", headers=headers)
 ```
 
-### App registration: `claude-exo`
+### App registration: `claude-m365` (renamed from `claude-exo` 2026-07-20)
 
-- **App ID:** `69de0375-242d-4b8a-94df-4e095ab81cea`
+**Single consolidated app** for ALL Graph app-only + Exchange Online work — mail, Intune, Entra
+(Conditional Access / MFA / groups), and App Proxy. The former `claude-intune` and `Claude Intune`
+apps were folded in and disabled on 2026-07-20 (their `.tokens/intune-graph` and `graph-intune`
+secret files are archived `.retired`). Do not create a separate Intune app — extend this one.
+
+- **App ID:** `69de0375-242d-4b8a-94df-4e095ab81cea` (unchanged by the rename)
+- **SP Object ID:** `176b0e4e-4237-4381-bc4e-cbad24852ab6`
 - **Tenant:** `d5c15341-dfce-470a-bfdf-72c3dab91e7c` (themyersbriggs.com)
-- **Auth:** Certificate — key/cert at `~/GitHub/.tokens/exo-claude/`
-- **Current permissions (application):**
-  - `Mail.ReadWrite`
-  - `DeviceManagementConfiguration.ReadWrite.All`
-  - `AuditLog.Read.All`
-  - `DeviceManagementScripts.ReadWrite.All`
-  - `DeviceManagementManagedDevices.Read.All`
-  - `DeviceManagementApps.Read.All` (added 2026-06-04 — read-only; required for `/deviceAppManagement/mobileApps`; appRole GUID `7a6ee1e7-141e-4cec-ae74-d9db155731ff`)
+- **Auth:** Certificate — key/cert at `~/GitHub/.tokens/claude-m365/`
+- **Current permissions (17 application roles):** `Mail.Read`, `Mail.ReadWrite`;
+  `DeviceManagementApps.ReadWrite.All`, `DeviceManagementConfiguration.ReadWrite.All`,
+  `DeviceManagementScripts.ReadWrite.All`, `DeviceManagementManagedDevices.Read.All`,
+  `DeviceManagementServiceConfig.Read.All`; `Policy.Read.All`, `Policy.ReadWrite.ConditionalAccess`,
+  `Policy.ReadWrite.AuthenticationMethod`, `UserAuthenticationMethod.ReadWrite.All`, `User.Read.All`,
+  `Group.ReadWrite.All`, `Application.Read.All`; `OnPremisesPublishingProfiles.ReadWrite.All`;
+  `AuditLog.Read.All`. Plus Exchange: Recipient Management role group + Exchange Administrator role.
 
 If a task requires a permission not listed above, **add it to this app** rather than
 creating a temporary app registration. See "Adding permissions" below.
@@ -131,7 +137,7 @@ is current. Clean up with `az ad app credential list` and `az ad app credential 
 
 ---
 
-## Adding permissions to `claude-exo`
+## Adding permissions to `claude-m365`
 
 ```bash
 # 1. Look up the appRole GUID

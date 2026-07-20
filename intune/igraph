@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 igraph — Intune Graph API CLI wrapper
-Uses claude-exo cert for app-only auth (no interactive login required).
+Uses claude-m365 cert for app-only auth (no interactive login required).
 
 Usage:
   igraph <path> [query]                     GET
@@ -32,7 +32,7 @@ except ImportError:
 
 TENANT   = "d5c15341-dfce-470a-bfdf-72c3dab91e7c"
 APP_ID   = "69de0375-242d-4b8a-94df-4e095ab81cea"
-CERT_DIR = Path.home() / "GitHub/.tokens/exo-claude"
+CERT_DIR = Path.home() / "GitHub/.tokens/claude-m365"
 GRAPH    = "https://graph.microsoft.com/v1.0"
 
 def get_token():

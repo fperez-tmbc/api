@@ -11,11 +11,11 @@ Expectation Failed`, intermittently breaking the module there too.)
 
 **Workaround — hit the EXO admin REST API directly from Python** (no module, no
 bug; works from macOS with clean egress). Get an app-only token with the
-`claude-exo` cert via MSAL, then POST `InvokeCommand`:
+`claude-m365` cert via MSAL, then POST `InvokeCommand`:
 
 ```python
 import json, msal, requests
-cfg = json.load(open("~/GitHub/.tokens/exo-claude/config.json".replace("~", __import__("os").path.expanduser("~"))))
+cfg = json.load(open("~/GitHub/.tokens/claude-m365/config.json".replace("~", __import__("os").path.expanduser("~"))))
 app = msal.ConfidentialClientApplication(
     cfg["appId"], authority=f"https://login.microsoftonline.com/{cfg['tenantId']}",
     client_credential={"private_key": open(cfg["certPem"].replace("cert.pem","key.pem")).read(),
@@ -46,7 +46,7 @@ Basic auth and user-delegated auth are not viable on macOS for non-interactive u
 
 | Field | Value |
 |---|---|
-| App name | `claude-exo` |
+| App name | `claude-m365` (renamed from `claude-exo` 2026-07-20; now the single consolidated Graph + EXO app for the tenant) |
 | App ID | `69de0375-242d-4b8a-94df-4e095ab81cea` |
 | SP Object ID | `176b0e4e-4237-4381-bc4e-cbad24852ab6` |
 | Tenant | `d5c15341-dfce-470a-bfdf-72c3dab91e7c` (themyersbriggs.com) |
@@ -55,7 +55,7 @@ Basic auth and user-delegated auth are not viable on macOS for non-interactive u
 | Entra role | `Exchange Administrator` |
 | Cert expiry | 2027-05-13 |
 
-Credentials: `~/.tokens/exo-claude/` — `cert.pfx`, `cert.pem`, `key.pem`, `config.json`
+Credentials: `~/.tokens/claude-m365/` — `cert.pfx`, `cert.pem`, `key.pem`, `config.json`
 
 ### Connection Snippet
 
@@ -63,7 +63,7 @@ Credentials: `~/.tokens/exo-claude/` — `cert.pfx`, `cert.pem`, `key.pem`, `con
 Import-Module ExchangeOnlineManagement
 Connect-ExchangeOnline `
     -AppId '69de0375-242d-4b8a-94df-4e095ab81cea' `
-    -CertificateFilePath '/Users/fperez2nd/GitHub/.tokens/exo-claude/cert.pfx' `
+    -CertificateFilePath '/Users/fperez2nd/GitHub/.tokens/claude-m365/cert.pfx' `
     -Organization 'themyersbriggs.com' `
     -ShowBanner:$false
 ```
