@@ -32,8 +32,8 @@ r = requests.get(f"{BETA}/deviceManagement/deviceManagementScripts", headers=hea
 
 **Single consolidated app** for ALL Graph app-only + Exchange Online work — mail, Intune, Entra
 (Conditional Access / MFA / groups), and App Proxy. The former `claude-intune` and `Claude Intune`
-apps were folded in and disabled on 2026-07-20 (their `.tokens/intune-graph` and `graph-intune`
-secret files are archived `.retired`). Do not create a separate Intune app — extend this one.
+apps were folded in and hard-deleted on 2026-07-20 (registrations + SPs and their old
+`.tokens/intune-graph` / `graph-intune` secret files removed). Do not create a separate Intune app — extend this one.
 
 - **App ID:** `69de0375-242d-4b8a-94df-4e095ab81cea` (unchanged by the rename)
 - **SP Object ID:** `176b0e4e-4237-4381-bc4e-cbad24852ab6`
