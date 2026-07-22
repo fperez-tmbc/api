@@ -27,17 +27,21 @@ Stored in `~/GitHub/.tokens/salesforce` (outside the repo). Contains:
 
 ### Token exchange
 
+The script prints a **JSON object** to stdout (keys `access_token`, `instance_url`, `token_type`), not shell `KEY=value` exports. Do **not** `eval` its output — that fails with `command not found: access_token:`. Parse the JSON:
+
 ```bash
-python3 /Users/fperez2nd/GitHub/api/sf/scripts/get_token.py --env sandbox   # or --env prod
+TOKENJSON=$(python3 /Users/fperez2nd/GitHub/api/sf/scripts/get_token.py --env prod)   # or --env sandbox
+access_token=$(echo "$TOKENJSON" | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+instance_url=$(echo "$TOKENJSON" | python3 -c "import sys,json;print(json.load(sys.stdin)['instance_url'])")
 ```
 
-Returns `access_token` and `instance_url`. Use as:
+Use as:
 
 ```
 Authorization: Bearer <access_token>
 ```
 
-Token TTL is ~2 hours. Re-run the script to get a fresh token — there is no refresh token.
+Token TTL is ~2 hours. Re-run the script to get a fresh token — there is no refresh token. Every new shell (each `Bash` call) needs its own token; shell variables don't persist between calls.
 
 ### Connected App location
 
@@ -112,6 +116,8 @@ GET /services/data/v62.0/tooling/query?q=SELECT+Id,DeveloperName,MasterLabel,Aut
 - Use the `Id` from a query result to fetch the full record via `/sobjects/{type}/{Id}`
 - API version used: `v62.0` — bump as needed; older versions may not expose all fields
 - Standard SOQL applies: `WHERE`, `LIKE`, `ORDER BY`, `LIMIT` all work
+- `get_token.py` outputs JSON, not shell exports — parse it, don't `eval` it (see [Token exchange](#token-exchange))
+- `totalSize` in a query response reflects rows returned (respects `LIMIT`), not the full table count — use `SELECT COUNT(Id)` for a true total
 
 ---
 
