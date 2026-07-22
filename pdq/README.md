@@ -14,6 +14,15 @@ SSHPASS="$PDQ_PASS" sshpass -e ssh -n -q \
     "claude@SVPDQHQ01.cpp-db.com" "<command>"
 ```
 
+### `claude` account — capabilities & limits
+- **Read-only SQLite + PDQ Deploy only.** The `claude` account can query the Inventory/Deploy DBs directly (sqlite3) and run **PDQ Deploy** (`PDQDeploy.exe Deploy ...`).
+- **PDQ Inventory background-service verbs are BLOCKED.** `ADSync`, `DeleteComputers`, `ScanComputers`, etc. return `Access denied to PDQ Inventory background service ... add SVPDQHQ01\claude to Console Users`.
+- **Not granted on purpose:** a PDQ Inventory **Console User consumes a license** (Frank, 2026-07-21), so `claude` is intentionally left out. To add / sync / delete computers in Inventory, do it in the console GUI (or Frank runs the CLI). Don't propose adding `claude` to Console Users.
+
+### AD sync / disabled computers
+- `Computers.ADIsDisabled` is a **string** (`'Enabled'` / `'Disabled'`), NOT `1/0`. Filter with `WHERE ADIsDisabled='Disabled'`.
+- **AD Sync does not delete *disabled* computers** — it only removes computers no longer present in the synced AD scope. In practice all inventory machines show `Enabled` (the sync scope excludes disabled accounts), so a decommissioned/disabled machine is dropped when the scheduled AD sync re-reads it, or delete it manually in the console. SVPRINTHQ01 was already gone this way; SVFSAU01 will drop on the next sync (or manual delete).
+
 ---
 
 ## Windows paths on SVPDQHQ01
