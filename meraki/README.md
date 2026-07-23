@@ -29,8 +29,11 @@ curl -sL -H "X-Cisco-Meraki-API-Key: $KEY" -H "Accept: application/json" \
 | Syslog servers | `/networks/{netId}/syslogServers` |
 | Switch L3 interfaces | `/devices/{serial}/switch/routing/interfaces` (400 if switch is L2-only) |
 | Switch L3 interface DHCP | `/devices/{serial}/switch/routing/interfaces/{id}/dhcp` |
+| **Device mgmt interface (static IP/DNS)** | `GET/PUT /devices/{serial}/managementInterface` → `wan1/wan2.staticDns` |
+| Device online status | `/organizations/{orgId}/devices/statuses` |
 | Org SNMP | `/organizations/{orgId}/snmp` |
 
 ## Notes
 - MS switch `routing/interfaces` returns **HTTP 400** when the switch has no L3 routing configured — that means L2-only, not an error to fix.
-- To find all references to an IP/host, sweep per-network SSIDs + syslog + (switch) L3 DHCP and grep; there is no single "get full config" endpoint.
+- To find all references to an IP/host, sweep per-network SSIDs + syslog + (switch) L3 DHCP **AND every device's `managementInterface.wan1/wan2.staticDns`** — statically-configured switches/APs point their *own* resolver there, which none of the network-level endpoints reveal. (Learned the hard way on the SVDCAU01 decomm: the first sweep missed 4 AU MS225 switches whose `staticDns` = the DC being retired; they only surfaced in the DC's DNS query log.) There is no single "get full config" endpoint.
+- Changing a device's static DNS: **GET the full `wan1`, change only `staticDns`, PUT `{wan1: ...}` back** (preserve `staticIp`/gateway/mask/vlan byte-for-byte — a blind PUT can wipe the static IP). DNS is management-plane only; switching/routing is unaffected. Verify online status before/after via `/organizations/{orgId}/devices/statuses`.
