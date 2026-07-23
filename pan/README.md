@@ -359,3 +359,17 @@ Anti-Virus `Mismatch` after upgrade is normal (content version difference) and d
 - `get` on template-managed nodes returns empty (code 7) or merged config (code 19) — reads always work
 - `set` fails with "may need to override template object" when name contains slashes or when truly template-locked
 - Peer group modification requires web UI (template-managed); sub-nodes like redist-rules and aggregation are device-level
+
+## Reaching mgmt APIs from AWS (or any across-tunnel source)
+
+The firewall **mgmt IPs are transit-reachable behind the TRUST zone** (via the core router), not directly on a dataplane interface — so a flow from a remote zone (e.g. `AWS-TMBC`) to a mgmt IP is a normal `<remote-zone> → TRUST` flow needing a security rule + routing. It is NOT an out-of-band dead end.
+
+Diagnose (read-only):
+- `test routing fib-lookup virtual-router DEFAULT ip <srcIP>` per firewall → does it have a **return route** to the source? (Only the hub that terminates the tunnel will, until you redistribute.)
+- `test security-policy-match from <zone> to TRUST source <srcIP> destination <mgmtIP> protocol 6 destination-port 443` → empty `<result>` = no rule = implicit deny = silent drop/timeout.
+
+Fix (verified 2026-07-23 for the AWS config-backup Lambda; hub `avspan01`):
+1. Security rule at the **hub only** (spokes already trust hub-sourced traffic): `from <zone> to [TRUST + spoke zones]`, scoped address objects, service `service-https`.
+2. Redistribute the source prefix into **OSPF** (redist-profile matching the dest prefix → ospf `export-rules` entry, `new-path-type ext-1`). Spokes are OSPF-adjacent to the hub and learn it as O1; this fixes the reply path for both hub-local and remote mgmt in one change.
+
+Full writeup: `task-tracker/projects/pan-config-backup-aws/README.md`.
