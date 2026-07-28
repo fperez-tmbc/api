@@ -387,7 +387,30 @@ Solutions are created with `approval_status: UnApproved`. To approve, PUT with t
 | UnApproved | `260962000000006825` |
 | Approved | `260962000000006827` |
 
-`status` is always `null` in the API — approval state is tracked via `approval_status` only. `is_public` is `false` even on approved solutions and does not control visibility.
+`status` is always `null` in the API — approval state is tracked via `approval_status` only. `is_public` is `false` on almost every article in this portal (technician-facing KB); a small number are `true`.
+
+There is also a dedicated approve endpoint, which takes no payload:
+
+```bash
+sdp_call PUT "/solutions/{id}/approve"
+```
+
+`POST` to `/approve` returns `4001 Invalid Method` — it must be `PUT`.
+
+#### Editing a solution resets its approval
+
+**Any content `PUT /solutions/{id}` flips `approval_status` from Approved back to UnApproved**, and the console then shows the article as *Unapproved / Not Published*. This is silent — the PUT returns `status_code: 2000, success` with no warning. Always re-approve after editing:
+
+```bash
+sdp_put_input_data "/solutions/{id}" payload.json   # content edit -> UnApproved
+sdp_call PUT "/solutions/{id}/approve"              # restore Approved
+```
+
+Confirmed on SOL-304 (2026-07-28). Save the original `description` before any edit — it is the only rollback path, as `latest_version` stays `0` and there is no version history to restore from.
+
+#### Solution content lives in `description`, not `content`
+
+`GET /solutions/{id}` returns the article body in `description`. There is no `content` field — reading `.content` returns empty and looks like an empty article. `display_id.display_value` is the human-readable `SOL-nnn` reference.
 
 #### Topics
 
