@@ -187,9 +187,12 @@ body = {"data": [{"admin": True, "query": query}]}           # <-- admin:true is
 - `<sent select="from">` accepts a **full address or a bare domain**, and matches the envelope as
   well as the header. Searching a parent domain also catches subdomain senders (searching
   `analytics.getsafebase.com` surfaced mail whose envelope was `em377.analytics.getsafebase.com`).
-- `<text>` does a **body/header text match**, so `<text>em7919.themyersbriggs.net</text>` returns
-  DMARC aggregate reports *about* the domain rather than mail *from* it. Use `<sent>` for sender
-  questions, never `<text>`.
+- `<text>` is **loose relevance matching, NOT substring search. Do not use it for forensics.**
+  Verified 2026-07-29: `<text>Websense</text>` returned South Ayrshire MBTI enquiries with no
+  connection to Websense, and `<text>mbtithinkbox</text>` returned generic ADReport / Desktop Central
+  scheduled reports whose bodies (checked via `messageBodyPreview`) contain no such string. It behaves
+  like a relevance-ranked recent-mail query. Use `<sent>` for sender questions, and always verify any
+  `<text>` hit by pulling `archive/get-message-detail` → `messageBodyPreview` before believing it.
 - `<date>` accepts `select="between"` with `from`/`to`, or named ranges like `select="last_year"`.
 - Results come back **newest first**, so `page-size="1..3"` is enough to answer "last seen".
 - Response shape varies: results may be `data[0]["items"]` **or** a flat `data[]` list of messages.
@@ -201,6 +204,72 @@ body = {"data": [{"admin": True, "query": query}]}           # <-- admin:true is
 - Paging uses `meta.pagination.next` → pass back as `meta.pagination.pageToken`.
 - `archive/create-search` and `archive/get-search-results` are **`app_forbidden`**; only
   `archive/search` and `archive/get-archive-search-logs` are available.
+
+## Audit log — the change-history tool (`audit/get-audit-events`)
+
+**Best available answer to "what changed, when, and who did it."** Requires `startDateTime` and
+`endDateTime`; both are mandatory or you get two `err_validation_null`.
+
+```zsh
+curl -s -X POST "https://us-api.services.mimecast.com/api/audit/get-audit-events" \
+  -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" \
+  -d '{"data":[{"startDateTime":"2026-07-29T00:00:00+0000",
+                "endDateTime":"2026-07-30T00:00:00+0000"}],
+       "meta":{"pagination":{"pageSize":100}}}'
+```
+
+Returns `id`, `auditType`, `user`, `eventTime`, `eventInfo`, `category`. **`eventInfo` contains the
+full policy definition**, which is how you reconstruct a policy you can no longer read via the
+policy endpoints:
+
+```
+2026-07-29T19:27:28  New Policy  Anti-Spoofing [TEMP]
+  F(@themyersbriggs.net) T(Internal) [Active] [Apply Anti-Spoofing (Exclude Mimecast IPs)]
+```
+
+- **Retention is ~60-90 days.** Verified 2026-07-29: single-day probes return rows for 2026-06-15
+  through today, zero for 2026-05-01 and anything older. Useless for migration-era archaeology.
+- `auditType` values seen: `New Policy`, `Policy Deleted`, `Existing Policy Changed`,
+  `Domain Adjustments`, `Profile Group (unlink) Log Entry`.
+- `audit/get-audit-categories`, `account/get-audit-events` and `audit/search` are all unavailable.
+- Page via `meta.pagination.next` → `pageToken`.
+
+**Use this to timestamp your own changes before drawing conclusions from mail flow.** On 2026-07-29
+an anti-spoofing policy was created at 19:27:28 and messages at 19:00:05 were wrongly cited as proof
+it hadn't broken anything. The audit log is what caught it.
+
+## Anti-Spoofing — semantics that are not obvious
+
+- **Anti-Spoofing OVERRIDES Permitted Senders.** Per Mimecast, a message from a Permitted Sender is
+  still rejected if detected as spoofing. So an anti-spoofing policy outranks the whole permit layer.
+  Never assume a permit entry protects a flow from anti-spoofing.
+- **Anti-Spoofing does NOT honour your SPF record.** That is why Mimecast ships a separate
+  `Anti-Spoofing SPF Bypass` policy type; it would be redundant otherwise. Independent confirmation:
+  Salesforce's KB for `550 Anti-Spoofing policy - Inbound not allowed` (post-Hyperforce) tells
+  customers to configure a Mimecast SPF-based bypass, **not** to fix SPF. Correct SPF is not a
+  defence against anti-spoofing rejection.
+- **`Default Anti-Spoofing Allow Policy` is an exception holder, not an enforcement policy.** Its
+  documented use is Everyone→Everyone with **Policy Override** ticked and legitimate third-party
+  sender IPs in **Source IP Ranges**. It is disabled at TMBC and should stay that way; enabling it as
+  a blanket `Apply Anti-Spoofing` would (a) lack the Mimecast IP exclusion that every per-domain
+  policy has, breaking journaling/forwarding loopback, and (b) sit above the entire Permitted Senders
+  layer.
+- **Correct per-domain baseline** (all 19 TMBC internal domains, verified 2026-07-29):
+  `Apply Anti-Spoofing (Exclude Mimecast IPs)`, `Addresses Based On = Both`, From = Email Domain,
+  To = Internal Addresses, Enable, Always On, no Policy Override, no Bi Directional, empty Source IPs.
+- Mimecast guidance: every internal domain needs either an `Apply Anti-Spoofing (exclude Mimecast IPs)`
+  policy **or** a `Take No Action` policy restricted by source IP. Nothing should be uncovered.
+- Beware SPF-bypass policies containing broad cloud ranges (O365, Google) — same shared-infrastructure
+  trap as `amazonses.com`.
+- See `Anti-Spoofing Header Lockout Resolution` in Mimecast docs if a broad policy locks something out.
+
+### Internal Directories ↔ auto-created policy drift
+
+`Users & Groups → Internal Directories` drives the `Auto Created Anti-Spoofing Policy` set, but
+**removing an internal directory does NOT remove its auto-created policy.** TMBC had 8 orphaned
+policies for domains that were no longer internal directories (some no longer even registered), plus
+3 internal directories with no policy at all. Diff both lists whenever auditing; neither side is
+authoritative on its own. Adding a domain auto-creates the policy, so no global catch-all is needed.
 
 ## Auditing permitted senders for dead entries — methodology
 
