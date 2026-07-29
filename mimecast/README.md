@@ -42,7 +42,26 @@
   the application."* Same for `policy/spam-scanning/get-policy`, `gateway/get-policy`, `policy/get-policy`.
   Group **membership** is readable (`directory/get-group-members`); the **policy** that consumes the
   group is not.
+- **Anti-spoofing policy** (`policy/antispoofing/get-policy`) → `app_forbidden`.
+  `policy/antispoofing-bypass/get-policy` exists but needs a specific `id`, so it can't be enumerated.
+- **Group membership WRITES.** `directory/add-group-member` and `directory/remove-group-member` both
+  exist and pass schema validation, but every call against the `Permitted senders` group fails with
+  `err_xdk_operation_forbidden_for_address` — *"0003 Forbidden To Perform Operation For Address"*.
+  Reads work, writes do not. **Group edits must be done in the console.** Verified 2026-07-29 across
+  23 entries: 0 succeeded, member count unchanged, no partial state.
 - Impersonation Protection policy config (see above)
+
+### Group IDs: always resolve dynamically
+Group IDs are ~250-char base64 blobs and are trivially corrupted by copy-paste. A truncated ID gives
+`HTTP 400` with an **empty response body**, which is easy to misread as a transient failure. Never
+hardcode one; look it up by description each run:
+
+```python
+j = call("directory/find-groups", {"data":[{"source":"cloud"}],
+                                  "meta":{"pagination":{"pageSize":200}}})
+gid = next(f["id"] for f in j["data"][0]["folders"]
+           if f["description"] == "Permitted senders")
+```
 
 ## Permitted Senders — envelope vs header matching
 
@@ -129,6 +148,84 @@ curl -s -X POST "https://us-api.services.mimecast.com/api/message-finder/search"
   showing which policies actually fired. Use `policyInfo` to confirm a new permit policy is matching.
 - `gateway/get-hold-message-list` returns held messages **directly as `data[]`** (not nested under a
   `heldMessages` key). Fields: `from` (envelope), `fromHeader`, `reason`, `reasonCode`, `policyInfo`.
+
+## Archive Search — full retention (`archive/search`)
+
+**Use this, not `message-finder/search`, for any "when did we last get mail from X" question.**
+`message-finder` caps at ~30 days. Archive search reaches back to **at least 2015** (verified: probed
+2016 / 2018 / 2020 / 2022 / 2024, all returned results).
+
+### The two gotchas that cost an hour on 2026-07-29
+
+1. **`"admin": true` is REQUIRED in the data object.** Without it every query returns
+   `meta.status: 200` with `data[0].items == []` — a silent empty result, not an error. This looks
+   exactly like "no permission" or "no such mail" and will send you chasing the wrong problem.
+   It is easy to conclude the archive is unlicensed. It is not.
+2. **`query` is Mimecast search XML**, passed as a JSON *string*. A plain string like
+   `"from:x@y.com"` fails with `err_invalid_search_xml`.
+
+### Working recipe (verified)
+
+```python
+RF = "".join(f"<return-field>{f}</return-field>" for f in
+             ("subject","receiveddate","displayfrom","displayto","status","id","smash"))
+
+query = ('<?xml version="1.0"?><xmlquery trace="iql,muse">'
+         '<metadata query-type="emailarchive" archive="true" active="false"'
+         ' page-size="3" startrow="0">'
+         '<mailboxes/><smartfolders/>'                       # empty = org-wide (with admin:true)
+         f'<return-fields>{RF}</return-fields></metadata>'
+         '<muse><text></text>'
+         '<date select="between" from="2015-01-01T00:00:00Z" to="2026-07-30T00:00:00Z"/>'
+         '<sent select="from">example.com</sent>'            # address OR bare domain
+         '</muse></xmlquery>')
+
+body = {"data": [{"admin": True, "query": query}]}           # <-- admin:true is the magic
+```
+
+### Query notes
+- `<sent select="from">` accepts a **full address or a bare domain**, and matches the envelope as
+  well as the header. Searching a parent domain also catches subdomain senders (searching
+  `analytics.getsafebase.com` surfaced mail whose envelope was `em377.analytics.getsafebase.com`).
+- `<text>` does a **body/header text match**, so `<text>em7919.themyersbriggs.net</text>` returns
+  DMARC aggregate reports *about* the domain rather than mail *from* it. Use `<sent>` for sender
+  questions, never `<text>`.
+- `<date>` accepts `select="between"` with `from`/`to`, or named ranges like `select="last_year"`.
+- Results come back **newest first**, so `page-size="1..3"` is enough to answer "last seen".
+- Response shape varies: results may be `data[0]["items"]` **or** a flat `data[]` list of messages.
+  Handle both:
+  ```python
+  d = j.get("data", [])
+  items = d[0]["items"] if (d and isinstance(d[0], dict) and "items" in d[0]) else d
+  ```
+- Paging uses `meta.pagination.next` → pass back as `meta.pagination.pageToken`.
+- `archive/create-search` and `archive/get-search-results` are **`app_forbidden`**; only
+  `archive/search` and `archive/get-archive-search-logs` are available.
+
+## Auditing permitted senders for dead entries — methodology
+
+Learned the hard way on 2026-07-29. **DNS status alone is NOT sufficient to declare a permitted
+sender dead.**
+
+A sender can transmit with an envelope domain that does **not resolve publicly**. Real example:
+`em7919.themyersbriggs.net` is `NXDOMAIN` on 1.1.1.1 / 8.8.8.8 / 9.9.9.9 with no SPF record, yet it
+carried **1,878 messages in 30 days** of live D365 notification mail (outbound via SendGrid,
+re-entering inbound). A DNS-only audit would have deleted it and dumped that flow into the held queue.
+
+DNS absence proves **SPF cannot pass**. It does **not** prove mail is not arriving.
+
+Correct order of evidence:
+1. **`archive/search` receipt history** (authoritative — is this sender actually in use?)
+2. DNS existence + records (can it be used, and can a forged envelope be contradicted?)
+3. SPF presence (`v=spf1 -all` with no includes = hard-fenced, not forgeable; `~all` = softfail,
+   partly forgeable; shared-platform includes = forgeable by anyone on that platform)
+
+Also note "has A but no MX" is **not** dead — send-only domains legitimately lack MX
+(`email.asana.com`, `office.com`, `atlassian.net`, `themyersbriggs.net`).
+
+Watch for **rotated ESP subdomains**: `em366.themyersbriggs.net` (last mail 2021) and
+`em7919.themyersbriggs.net` (live) are the same SendGrid flow after a subuser rotation. The dead
+predecessor lingers in the group; the live successor must be kept.
 
 ## Impersonation Protection Config (from console screenshots)
 
