@@ -219,6 +219,16 @@ body = {"data": [{"admin": True, "query": query}]}           # <-- admin:true is
 - `<sent select="from">` accepts a **full address or a bare domain**, and matches the envelope as
   well as the header. Searching a parent domain also catches subdomain senders (searching
   `analytics.getsafebase.com` surfaced mail whose envelope was `em377.analytics.getsafebase.com`).
+- **To filter by recipient, use `<sent select="to">…</sent>`.** It combines with
+  `<sent select="from">` in the same `<muse>` block to answer "what did X send to Y".
+  Verified 2026-07-30: `hotmail.com` org-wide returned 10 hits, and adding
+  `<sent select="to">amoore@themyersbriggs.com</sent>` narrowed it to 3.
+
+  **`<received select="to">`, `<to>` and `<recipient>` are silently ignored** — no error, no
+  `err_invalid_search_xml`, the query just returns the unfiltered org-wide result. This is the
+  dangerous failure mode: results look plausible and are wrong. If every recipient you test
+  returns the same senders and the same count, the filter is not being applied. Sanity-check by
+  running the query with and without the filter and confirming the count actually drops.
 - `<text>` is **loose relevance matching, NOT substring search. Do not use it for forensics.**
   Verified 2026-07-29: `<text>Websense</text>` returned South Ayrshire MBTI enquiries with no
   connection to Websense, and `<text>mbtithinkbox</text>` returned generic ADReport / Desktop Central
