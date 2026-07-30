@@ -63,6 +63,44 @@ gid = next(f["id"] for f in j["data"][0]["folders"]
            if f["description"] == "Permitted senders")
 ```
 
+### Group members carry `notes`, `name` and `type` — always read them
+
+`directory/get-group-members` returns far more than the address. **Pull these before judging any
+entry**; they frequently contain the justification and change the verdict.
+
+```python
+{"emailAddress": "jeff-hayes1@comcast.net", "name": "", "internal": False,
+ "domain": "comcast.net", "type": "created_manually",
+ "notes": "Jeff Hayes's personal email address. Thad approved it."}
+```
+
+| Field | Meaning |
+|---|---|
+| `notes` | Free-text justification an admin typed in the console |
+| `name` | Display name captured when the entry was created |
+| `type` | `created_manually` / `created_by_email` / `contact_from_ldap` — how it got there |
+
+Bare-domain entries have `emailAddress: ""` and the domain in `domain`; address entries populate both.
+
+Verified 2026-07-30 on the `Permitted senders` group (405 members, 30 with notes) and
+`Blocked Senders` (122 members, 50 with notes). Blocked entries are typically well annotated
+(*"Jeff phishing"*, *"pretending to be HR"*, *"A copycat/impostor site. Do Not Use."*); permitted
+entries much less so. **An undocumented bare-domain permit is more likely accumulated residue than a
+decision** — the deliberate ones tend to say why (*"HR Benefits"*, *"We use this product (Centrify)"*,
+*"Requested by Nicole per SD ticket #84579"*).
+
+Paging: `meta.pagination.pageSize` up to 500, follow `meta.pagination.next` → `pageToken`.
+A single unpaged call silently caps at 999 (a `/groups` pull returned 999 of 1093).
+
+### Pagination and sort order will mislead you
+
+`archive/search` returns **newest first**. A `page-size` smaller than the true result count therefore
+gives you the most recent slice, not a sample of the whole. Verified 2026-07-30: a 30-row pull of
+`gmx.com` returned nothing but 2021 subscription scams and supported "the block is correct"; the full
+132 rows showed roughly 60% legitimate German customer and job-applicant correspondence, and the
+opposite conclusion. **Before characterising what a sender carries, page to the end or raise
+`page-size` past the total.**
+
 ## Permitted Senders — envelope vs header matching
 
 `Administration → Gateway → Policies → Permitted Senders`
