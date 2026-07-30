@@ -458,6 +458,17 @@ predecessor lingers in the group; the live successor must be kept.
 
 #### Targeted / Per-Sender Policies (VIP protection)
 
+> **⚠ UNVERIFIED — do not cite this table as fact. Re-read it from the console before acting.**
+>
+> Transcribed 2026-05-11 (`61c006a`). On 2026-07-29 the row `Eugene Pace` was shown to be
+> **fabricated**: Entra holds exactly one Pace (`Elayne Pace`, `epace@`, disabled), and 11 years of
+> archive show "Elayne Pace" 56 times and "Eugene Pace" zero times. The name was inferred from the
+> `epace@` local part rather than read from the console.
+>
+> Since one row was invented, none of the rows can be trusted. Impersonation Protection config is
+> **not** API-readable, so the console is the only source of truth. Treat the list below as a hint
+> about which people are covered, not as the configuration.
+
 These apply the Strict definition to specific named individuals to prevent display-name spoofing of executives/VIPs. Each is Eternal.
 
 | From (display name) | To | Definition | Narrative |
