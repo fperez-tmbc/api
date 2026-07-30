@@ -83,6 +83,38 @@ spoofable, and that group holds ~435 members of which ~368 are whole domains, so
 To permit a sender on its **header** address, create a **separate, narrowly scoped policy** with
 `Addresses Based On = Both` and `Applies From = Individual Email Address`. Leave the default alone.
 
+### Reading matching mode off the policy LIST (no need to open each policy)
+
+In the Gateway Policies list, the **From** column wraps the value in square brackets when the policy
+is **envelope-only**; no brackets means **Both**:
+
+```
+[ @*.adp.com]                 <- envelope only (P1)
+[ Permitted senders]          <- envelope only (P1)  - the Default Permitted Senders Policy
+@*.myob.com                   <- Both (P1 + P2)
+no-reply@sns.amazonaws.com    <- Both (P1 + P2)
+```
+
+Verified 2026-07-29 against three policies whose detail pages were open at the same time. This is the
+fast way to audit matching mode across the whole list, which matters because Permitted Senders policy
+config is **not** readable via the API.
+
+### Wildcards: policies only, never groups
+
+`@*.domain.com` wildcards work in an **individual policy**. Profile groups are **exact match only** —
+a root domain in a group does **not** cover its subdomains, and wildcards cannot be added to a group.
+
+So a vendor using subdomains needs both:
+- an individual policy `@*.vendor.com` for the subdomains, and
+- an exact group entry `vendor.com` for the apex (the wildcard is not known to cover the apex; TMBC
+  mirrors this pattern for Salesforce, Expensify, Atlassian, ADP and Fidelity).
+
+**Do not infer subdomain coverage from mail being delivered.** Delivery is the default; a permit only
+bypasses spam scanning. Confusing the two produced a wrong conclusion on 2026-07-29.
+`message-finder/get-message-info` → `policyInfo` reports the policy *type* and *action*
+(`Permitted Senders` / `Permit sender`) but **not** the policy narrative, so it cannot tell you which
+of two candidate policies matched.
+
 Caveat Mimecast prints on that screen: P2 or Both matching **cannot** bypass Greylisting or RBL
 checks, which are envelope-based.
 
