@@ -147,6 +147,40 @@ notation tells you. Do not report an unbracketed policy as `Both` without openin
 This still makes the list view useful for auditing: it reliably identifies every envelope-only policy,
 which matters because Permitted Senders policy config is **not** readable via the API.
 
+### `message-finder/search` is the ONLY way to read the envelope sender
+
+`archive/search` and `archive/get-message-detail` do **not** expose the envelope. Headers come back
+without `Return-Path`, and `fromEnv` / `fromHdr` are always null on the archive detail response.
+Use `message-finder/search` instead — it returns both:
+
+```python
+body = {"data": [{"searchReason": "permit audit",
+                  "start": "2026-07-01T00:00:00Z", "end": "2026-07-31T00:00:00Z",
+                  "advancedTrackAndTraceOptions": {"from": "noreply@notifications.hubspot.com"}}],
+        "meta": {"pagination": {"pageSize": 200}}}
+# -> data[0].trackedEmails[].fromEnv.emailAddress / .fromHdr.emailAddress
+```
+
+Validation rules that will bite:
+- `messageId` **or** `advancedTrackAndTraceOptions`, never both, and neither may be blank.
+- `advancedTrackAndTraceOptions` needs at least one of `from`, `to`, `subject`, `senderIP`, `url`.
+  A bare `senderDomain` fails with `err_validation_at_least_one_not_null`.
+- `senderAddress` and `recipientAddress` come back null; read `fromEnv` / `fromHdr` instead.
+
+Retention is ~30 days, so this answers "what is the envelope today", not historical questions.
+
+**Why it matters:** envelope and header routinely sit on different domains, and every permit
+decision depends on which one you are matching. HubSpot, verified 2026-07-30:
+
+```
+fromHdr: noreply@notifications.hubspot.com          stable
+fromEnv: 1axb1ik3bj...@notifybf1.na2.hubspot.com    per-message VERP, shared bounce pool
+```
+
+2,811 of 2,881 messages had the envelope on `notifybf1.na2.hubspot.com` while every group entry
+named the *header* domain — under the envelope-only default policy those permits fired on 70 of
+2,881. Do not assume the two addresses share a domain.
+
 ### Choosing the matching mode: does the envelope stay in the vendor's own domain tree?
 
 That is the whole test.
