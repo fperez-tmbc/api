@@ -121,21 +121,56 @@ spoofable, and that group holds ~435 members of which ~368 are whole domains, so
 To permit a sender on its **header** address, create a **separate, narrowly scoped policy** with
 `Addresses Based On = Both` and `Applies From = Individual Email Address`. Leave the default alone.
 
-### Reading matching mode off the policy LIST (no need to open each policy)
+### Reading matching mode off the policy LIST — the inference is ONE-WAY
 
 In the Gateway Policies list, the **From** column wraps the value in square brackets when the policy
-is **envelope-only**; no brackets means **Both**:
+is **envelope-only**. That direction is reliable:
 
 ```
-[ @*.adp.com]                 <- envelope only (P1)
-[ Permitted senders]          <- envelope only (P1)  - the Default Permitted Senders Policy
-@*.myob.com                   <- Both (P1 + P2)
-no-reply@sns.amazonaws.com    <- Both (P1 + P2)
+[ @*.adp.com]                 <- envelope only (P1).  Brackets ALWAYS mean envelope-only.
+[ Permitted senders]          <- envelope only (P1) - the Default Permitted Senders Policy
 ```
 
-Verified 2026-07-29 against three policies whose detail pages were open at the same time. This is the
-fast way to audit matching mode across the whole list, which matters because Permitted Senders policy
-config is **not** readable via the API.
+**The absence of brackets does NOT mean `Both`.** Header-only also renders without brackets, so an
+unbracketed row is either `Both` **or** header-only, and the list view cannot distinguish them. The
+only way to tell is to open the policy.
+
+```
+@*.myob.com                   <- Both OR header-only - list view cannot tell you which
+no-reply@sns.amazonaws.com    <- Both OR header-only
+```
+
+Corrected 2026-07-30 by Frank, who confirmed from the policy detail pages that in this tenant every
+unbracketed policy is in fact `Both` — but that is a fact about the current config, not something the
+notation tells you. Do not report an unbracketed policy as `Both` without opening it.
+
+This still makes the list view useful for auditing: it reliably identifies every envelope-only policy,
+which matters because Permitted Senders policy config is **not** readable via the API.
+
+### Choosing the matching mode: does the envelope stay in the vendor's own domain tree?
+
+That is the whole test.
+
+| Vendor | Envelope domains | Header From | Setting |
+|---|---|---|---|
+| ADP | `adp.com`, `emailservice.`, `m1.`, `m2.`, `list.` | `noreply@adp.com` | envelope only |
+| Fidelity | `fidelity.com`, `mail.`, `bounce.mail.` | `Fidelity.Alerts@Fidelity.com` | envelope only |
+| Adobe Sign | `mail.na1/na4/eu1.adobesign.com` | `adobesign@adobesign.com` | envelope only |
+| DocuSign | `docusign.net`, `eumail.docusign.net` | `dse_NA3@docusign.net` | envelope only |
+| MYOB | **`mandrillapp.com`** — third party, out of tree | `@apps.myob.com` | **Both** |
+
+In-tree means an `@*.vendor.com` wildcard policy matches the envelope, and the permit fires there —
+so the header never needs matching, even when the header From sits at the apex and the envelope at a
+subdomain. Pair the wildcard with the **apex as an exact group entry** to cover apex envelopes,
+because a wildcard does not match the apex.
+
+Prefer envelope-only whenever the envelope is in-tree: all these vendors publish enforcing DMARC, so
+a forged header From fails authentication before any permit is consulted. `Both` buys no coverage and
+widens the surface a forged header could exploit.
+
+**Trap:** "envelope-only would match the subdomain but not the apex" sounds like a gap and is not
+one. The subdomain *is* the envelope. Matching it is sufficient. This reasoning error produced two
+wrongly-configured policies on 2026-07-30.
 
 ### Wildcards: policies only, never groups
 
