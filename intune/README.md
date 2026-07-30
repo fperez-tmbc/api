@@ -39,13 +39,26 @@ apps were folded in and hard-deleted on 2026-07-20 (registrations + SPs and thei
 - **SP Object ID:** `176b0e4e-4237-4381-bc4e-cbad24852ab6`
 - **Tenant:** `d5c15341-dfce-470a-bfdf-72c3dab91e7c` (themyersbriggs.com)
 - **Auth:** Certificate — key/cert at `~/GitHub/.tokens/claude-m365/`
-- **Current permissions (17 application roles):** `Mail.Read`, `Mail.ReadWrite`;
+- **Current permissions (21 application roles, verified against the SP's `appRoleAssignments`
+  2026-07-30):** `Mail.Read`, `Mail.ReadWrite`; `DeviceManagementApps.Read.All`,
   `DeviceManagementApps.ReadWrite.All`, `DeviceManagementConfiguration.ReadWrite.All`,
   `DeviceManagementScripts.ReadWrite.All`, `DeviceManagementManagedDevices.Read.All`,
-  `DeviceManagementServiceConfig.Read.All`; `Policy.Read.All`, `Policy.ReadWrite.ConditionalAccess`,
+  `DeviceManagementServiceConfig.Read.All`, `DeviceLocalCredential.Read.All`;
+  `Policy.Read.All`, `Policy.ReadWrite.ConditionalAccess`,
   `Policy.ReadWrite.AuthenticationMethod`, `UserAuthenticationMethod.ReadWrite.All`, `User.Read.All`,
-  `Group.ReadWrite.All`, `Application.Read.All`; `OnPremisesPublishingProfiles.ReadWrite.All`;
-  `AuditLog.Read.All`. Plus Exchange: Recipient Management role group + Exchange Administrator role.
+  `Group.ReadWrite.All`, `Application.Read.All`, `RoleManagement.ReadWrite.Directory`;
+  `OnPremisesPublishingProfiles.ReadWrite.All`; `AuditLog.Read.All`;
+  `SecurityIdentitiesSensors.ReadWrite.All` (added 2026-07-30). Plus Exchange: Recipient
+  Management role group + Exchange Administrator role.
+
+  **The app manifest (`requiredResourceAccess`) is NOT the source of truth** — it only declared
+  10 of these. Always read the granted roles off the service principal:
+
+  ```bash
+  az rest --method GET --url \
+    "https://graph.microsoft.com/v1.0/servicePrincipals/176b0e4e-4237-4381-bc4e-cbad24852ab6/appRoleAssignments"
+  # then map appRoleId -> value via: az ad sp show --id 00000003-0000-0000-c000-000000000000 --query "appRoles"
+  ```
 
 If a task requires a permission not listed above, **add it to this app** rather than
 creating a temporary app registration. See "Adding permissions" below.
@@ -161,6 +174,45 @@ az rest --method POST \
   --headers "Content-Type=application/json" \
   --body "{\"principalId\":\"$CLAUDE_SP_ID\",\"resourceId\":\"$GRAPH_SP_ID\",\"appRoleId\":\"<new-guid>\"}"
 ```
+
+---
+
+## Defender for Identity (MDI) sensors — `v1.0/security/identities/sensors`
+
+MDI sensor inventory and deletion are fully scriptable through `igraph` on `v1.0` (no portal
+needed). Requires `SecurityIdentitiesSensors.ReadWrite.All` (granted 2026-07-30).
+
+```bash
+igraph /security/identities/sensors                    # list all
+igraph /security/identities/sensors/{sensorId}          # detail
+igraph DELETE /security/identities/sensors/{sensorId}   # returns HTTP 204 No Content
+```
+
+Useful fields on a sensor: `displayName` (short hostname, NOT FQDN), `deploymentStatus`
+(`upToDate` / `disconnected`), `serviceStatus` (`running` / `unknown`), `openHealthIssuesCount`,
+`healthStatus`, and `settings.domainControllerDnsNames[]` (the FQDN — match on this).
+
+### Decommissioned a DC? Delete its sensor, or MDI alerts forever
+
+A demoted/powered-off DC leaves an **orphaned sensor registration**. MDI keeps expecting
+check-ins and re-fires a Medium *"Sensor stopped communicating"* health issue to the
+notification recipients (`netops@themyersbriggs.com`) on a rolling ~7-day window —
+indefinitely. The alert body carries the sensor FQDN and the last-communication timestamp,
+which equals the moment the DC was powered off.
+
+Signature of an orphan: `deploymentStatus=disconnected` + `serviceStatus=unknown`. (The portal
+labels this status **Unreachable** and says it's safe to delete.) Deleting the sensor also
+clears its open health issue.
+
+Hit 2026-07-30 for `svdcau01.cpp-db.com` — demoted 2026-07-23, sensor never removed, so a
+Medium alert fired on 07/21 and again on 07/30. **Add "delete the MDI sensor" to every DC
+decommission checklist.** Microsoft's own guidance is to remove the sensor *before* demoting.
+
+### Health issue detail needs a separate permission
+
+`GET /security/identities/healthIssues` requires `SecurityIdentitiesHealth.Read.All`, which
+this app does NOT hold — it returns a bare `UnknownError` (not a 403), so don't read that as
+a malformed request. `openHealthIssuesCount` on the sensor object is available without it.
 
 ---
 
