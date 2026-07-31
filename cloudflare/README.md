@@ -84,8 +84,15 @@ Verified on a **Free** zone, 2026-07-31:
 |---|---|
 | Max window | **1 week.** Wider requests fail: *"cannot request a time range wider than 1w"* |
 | Legacy REST | `/dns_analytics/report` caps at **6h** on Free (`1034`), and is best avoided |
-| Counts | **Quantised to multiples of 10 and sampled.** 31 real TXT queries reported as 30; 30 real A queries reported as **10**. Presence is reliable, magnitude is not — never cite these as exact volumes |
+| Counts | **Sampled, and the quantisation itself varies between queries.** Observed multiples of **10** on one pull and multiples of **1,000** on another over the same 7-day window. Presence is reliable, magnitude is not — never cite these as exact volumes |
 | Ingestion lag | ~90 seconds |
+
+**A small non-zero value can be reported as 0.** On a coarse pull, `em7919` showed
+`NOERROR 0 / NXDOMAIN 7,000` when a finer pull minutes earlier over the same window had shown
+`NOERROR 80 / NXDOMAIN 3,240`. The 80 real lookups — the evidence that a DNS fix had taken
+effect — rounded away entirely. **A zero here does not prove absence.** If a small count
+matters, re-run with a narrower window and a smaller `limit` to get finer granularity, and
+prefer "absent from the result set" over "reported as 0" as your absence signal.
 
 **NXDOMAIN queries ARE logged, so deleting a record does not blind you.** This is the key property:
 analytics is query-driven, not record-driven, and `responseCode` is a dimension. Proven three ways
