@@ -411,6 +411,22 @@ for r in data['value']:
 "
 ```
 
+### The System administrator identifier is `-SYSADMIN-`, with leading and trailing hyphens
+
+Not `SYSADMIN`. The built-in admin role's `SecurityRoleIdentifier` is literally `-SYSADMIN-` (`SecurityRoleName` = `System administrator`). Guessing `SYSADMIN` finds nothing in the `SecurityRoles` catalog. `System user` is the plain `SYSTEMUSER` with no hyphens, so the two built-ins are not consistent with each other. Always resolve the identifier from `SecurityRoles` rather than assuming.
+
+The hyphens need no escaping in the OData key: `SecurityUserRoleAssociations(UserId='TFrost',SecurityRoleIdentifier='-SYSADMIN-')` works as-is. Confirmed 2026-07-31 (ticket 101500, PROD).
+
+### Converting a user to admin-only — order of operations matters
+
+To make a user a pure admin (System administrator + System user, nothing else), **add `-SYSADMIN-` first, then disable the others.** If you disable first and the add then fails, the user is left holding only `SYSTEMUSER` and is locked out of everything. `SYSTEMUSER` cannot be removed.
+
+`AssignmentStatus` round-trips cleanly, so this is genuinely reversible: PATCH `Disabled` then PATCH `Enabled` both return 204 and the state reads back correctly. Save the pre-change `SecurityUserRoleAssociations` output as the rollback record before starting, since the disabled rows retain their identifiers and can be flipped back one by one.
+
+Some custom roles carry **GUID identifiers** rather than readable AOT names (TMBC's "ViaSecCon" role variants, e.g. `2FE3E92B-AEC0-4C59-AFBC-5FC295CD8D58`). These PATCH exactly like named roles. Don't skip them when enumerating what to disable.
+
+36 sequential PATCHes against PROD completed with zero failures and no throttling, well within the concurrency guidance below.
+
 ### Docentric role identifiers (UAT/PROD confirmed 2026-05-06)
 
 | Identifier | Role Name |
