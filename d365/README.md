@@ -558,15 +558,28 @@ Confirmed 2026-06-04 ratios: PROD 70/159 disabled, UAT 84/175, QA 123/170. The l
 
 Driving off each environment's own flag wrongly strips roles from active employees in the lower envs. (This exact mistake was made and corrected on tickets 101273/101274.)
 
-### Legal entity company codes (UAT/PROD confirmed)
+### Legal entity company codes — full list from `Companies` (PROD, 2026-07-31)
 
-| Code | Notes |
-|------|-------|
-| `1000` | Appears on some roles; exact entity unclear |
-| `2100` | Primary Americas entity |
-| `2200` | SG/AU entity |
+Read authoritatively with `GET /data/Companies?$select=DataArea,Name`. Do not guess from the code number.
 
-AU/SG users have roles assigned to specific company codes via `SecurityUserRoleOrganizations`. All other users receive global assignments via `SecurityUserRoleAssociations` (no company restriction).
+| Code | Legal entity name | Notes |
+|------|-------------------|-------|
+| `1000` | The Myers-Briggs Company | Parent |
+| `2100` | The Myers-Briggs Company Pty Ltd | **Australia** ("Pty Ltd" is the AU form) |
+| `2200` | The Myers-Briggs Company Pte. Ltd. | **Singapore** ("Pte. Ltd." is the SG form) |
+| `3000` | TMBC EU Consolidation | Consolidation, not an operating entity |
+| `3100` | The Myers-Briggs Company Holdings (Europe) Limited | |
+| `3200` | TMBC Europe (OPPH) | |
+| `3300` | The Myers-Briggs Company Limited (Europe) | |
+| `3310`–`3370` | The Myers-Briggs Company Limited | Several distinct codes share this same display name; `3360` is TMBC Denmark (Discontinued) |
+| `3599` | TMBC EU Eliminations | Eliminations |
+| `3900` | Europe Eliminations Company | Eliminations |
+| `9999` | Asia-Pac Eliminations Company | Eliminations |
+| `DAT` | Company accounts data | Default/shared partition data |
+
+**Earlier versions of this table were wrong.** `2100` was previously documented as "Primary Americas entity" and `2200` as the combined "SG/AU entity". Both are incorrect: `2100` is Australia and `2200` is Singapore, and they are separate entities. Corrected 2026-07-31 against the live `Companies` entity. Because several `33x0` codes share the display name "The Myers-Briggs Company Limited", the name alone does not identify the entity, so always carry the code.
+
+AU/SG users may have roles assigned to specific company codes via `SecurityUserRoleOrganizations`. All other users receive global assignments via `SecurityUserRoleAssociations` (no company restriction). Note this is not universal: a UK user (`TFrost`, `3310`) had zero `SecurityUserRoleOrganizations` rows and all 42 assignments global, so always read both entities rather than inferring from region.
 
 ---
 
