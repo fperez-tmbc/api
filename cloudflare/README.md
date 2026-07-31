@@ -114,6 +114,28 @@ Interpretation traps:
   never guess and which sat at exactly 0. Mail-driven lookups also show a business-hours curve;
   scanning is flat.
 
+## ⚠ Before editing an SPF record — check its non-mail consumers
+
+**"No mail depends on this mechanism" does not mean "nothing depends on this mechanism."** An SPF
+record can be dereferenced by things that are not receiving mail servers, and those consumers are
+invisible to DMARC-report or mail-log analysis.
+
+Known consumer at TMBC: **Mimecast `Anti-Spoofing SPF Bypass` policies**. They resolve the SPF record
+of a configured domain and exempt connections whose IP is in it. Removing `include:sendgrid.net` from
+`themyersbriggs.net` on 2026-07-31 was verified safe for mail authentication — and still took out 23
+customer invoices four hours later, because the bypass policy matched the SendGrid IP only through
+that include. Full write-up in `../mimecast/README.md` under Anti-Spoofing.
+
+Checklist before removing an SPF mechanism:
+
+1. Which envelope domains actually use it? (`api/dmarc/analyze-reports.py`, single-`<spf>` records)
+2. Do the sending subdomains publish their **own** SPF? If so the apex is not in their path — but
+   that also means the apex may exist for something else entirely. Ask what.
+3. **Mimecast Anti-Spoofing SPF Bypass policy list** — console only, not API-readable.
+4. Anything else that resolves the record by name: monitoring, allow-lists, partner configs.
+5. Prefer **narrowing to the specific whitelabel domain** over deleting, and prefer pinning a bypass
+   policy to a `/32`-scoped whitelabel record over an apex that pulls in a vendor's whole `/17`.
+
 ## Gotchas
 - A Worker with no routes and no custom domains is unlinked and likely unused
 - Zone ID must be looked up by name first — it's not the domain name itself

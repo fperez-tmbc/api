@@ -456,9 +456,54 @@ it hadn't broken anything. The audit log is what caught it.
 
 ## Anti-Spoofing — semantics that are not obvious
 
+> ### ⚠ An `Anti-Spoofing SPF Bypass` policy is a CONSUMER of your SPF record
+>
+> **Before removing ANY mechanism from an SPF record, check the SPF-bypass policies.** These policies
+> resolve the SPF record of a *configured domain* and ask "is the connecting IP in it". That is a
+> completely separate evaluation from normal SPF authentication, which runs on the **envelope**
+> domain. A mechanism can be provably unused for mail authentication and still be load-bearing here.
+>
+> **Outage, 2026-07-31.** `include:sendgrid.net` was removed from `themyersbriggs.net`'s apex SPF
+> after verifying no mail used the bare apex as an envelope — correct, and irrelevant. The
+> `Anti-Spoofing SPF Bypass` policy listed only `themyersbriggs.net`, and the SendGrid sending IP
+> `168.245.48.216` matched it *solely* via that include (`sendgrid.net` → `168.245.0.0/17`). Removing
+> it silently un-exempted the flow:
+>
+> ```
+> 03:54:22 UTC  include:sendgrid.net removed from apex SPF
+> 04:00:07 UTC  first rejection, SIX MINUTES later
+>               -> "Anti-Spoofing Header Lockout", "Rejected prior to DATA acceptance"
+> 14:16:11 UTC  last rejection
+>
+> 81 messages rejected: 52 via em3639, 24 via em7919, 5 with a bare sendgrid.net envelope.
+> Invoices, Elevate licence-expiry (EN/FR/NL), Salesforce summaries, JIT errors, sales-order reviews.
+> All recipients internal, so customer-bound copies (which never traverse Mimecast) were unaffected.
+> ```
+>
+> **Scope this with `senderIP`, not sender addresses.** A first pass searching two known `from`
+> addresses found 26 of 81, missed `em7919` completely, and mis-dated the first rejection by four
+> hours. One `advancedTrackAndTraceOptions: {"senderIP": "..."}` query catches every whitelabel and
+> every sender behind that IP.
+>
+> **The misleading part:** `get-message-info` → `spamProcessingDetail` showed `spf: {allow: true}`,
+> because normal SPF *did* pass on the envelope `em3639.themyersbriggs.net`, which has its own
+> record. That passing result was wrongly read as exonerating the DNS change. **The SPF result in
+> `spamProcessingDetail` tells you nothing about whether a bypass policy matched.**
+>
+> **Fix, and the better pattern:** add the *whitelabel* domains to the bypass list
+> (`em3639.themyersbriggs.net`, `em7919.themyersbriggs.net`) instead of relying on the apex. Those
+> publish `v=spf1 ip4:168.245.48.216 -all`, so the bypass keys on **one** address rather than
+> SendGrid's shared `/17` (~32k addresses). Verified by sending a test through the same path:
+> `status: accepted` where it had been `rejected`.
+>
+> Anti-spoofing config is **console-only**, not API-readable, so no API-side verification will ever
+> surface this dependency. It has to be checked by hand in
+> `Administration → Gateway → Policies → Anti-Spoofing SPF Bypass`.
+
 - **Anti-Spoofing OVERRIDES Permitted Senders.** Per Mimecast, a message from a Permitted Sender is
   still rejected if detected as spoofing. So an anti-spoofing policy outranks the whole permit layer.
-  Never assume a permit entry protects a flow from anti-spoofing.
+  Never assume a permit entry protects a flow from anti-spoofing. Seen live 2026-07-31: the rejected
+  invoices showed `permittedSender: {allow: true, info: "whitelist"}` and were rejected anyway.
 - **Anti-Spoofing does NOT honour your SPF record.** That is why Mimecast ships a separate
   `Anti-Spoofing SPF Bypass` policy type; it would be redundant otherwise. Independent confirmation:
   Salesforce's KB for `550 Anti-Spoofing policy - Inbound not allowed` (post-Hyperforce) tells
