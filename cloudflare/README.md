@@ -122,9 +122,12 @@ invisible to DMARC-report or mail-log analysis.
 
 Known consumer at TMBC: **Mimecast `Anti-Spoofing SPF Bypass` policies**. They resolve the SPF record
 of a configured domain and exempt connections whose IP is in it. Removing `include:sendgrid.net` from
-`themyersbriggs.net` on 2026-07-31 was verified safe for mail authentication — and still took out 23
-customer invoices four hours later, because the bypass policy matched the SendGrid IP only through
-that include. Full write-up in `../mimecast/README.md` under Anti-Spoofing.
+`themyersbriggs.net` on 2026-07-31 was verified safe for mail authentication — and rejected **81
+messages** starting **six minutes later**, because the bypass policy matched the SendGrid IP only
+through that include. Resolved by putting `include:em3639.themyersbriggs.net` /
+`include:em7919.themyersbriggs.net` in the apex instead, which keeps the bypass policy on the apex
+(consistent with every other domain) while narrowing what it resolves to from 237,056 addresses to 1.
+Full write-up in `../mimecast/README.md` under Anti-Spoofing.
 
 Checklist before removing an SPF mechanism:
 
@@ -133,8 +136,14 @@ Checklist before removing an SPF mechanism:
    that also means the apex may exist for something else entirely. Ask what.
 3. **Mimecast Anti-Spoofing SPF Bypass policy list** — console only, not API-readable.
 4. Anything else that resolves the record by name: monitoring, allow-lists, partner configs.
-5. Prefer **narrowing to the specific whitelabel domain** over deleting, and prefer pinning a bypass
-   policy to a `/32`-scoped whitelabel record over an apex that pulls in a vendor's whole `/17`.
+5. Prefer **narrowing to the specific whitelabel domain** over deleting. For a mail vendor, replace
+   `include:vendor.com` with `include:<your-whitelabel>.<your-domain>` — you inherit the vendor's own
+   record scoped to your account (often a single dedicated IP) instead of their whole shared space,
+   and the mechanism stops looking like removable cruft.
+6. Leave the bypass policy pointed at the **apex**, consistent across domains, and fix what the apex
+   resolves to. Special-casing individual policies works but scatters the dependency.
+7. Add a **record comment** naming the dependency — the only warning visible at the point of edit.
+   Keep it short: 87 chars took, ~230 returned HTTP 400.
 
 ## Gotchas
 - A Worker with no routes and no custom domains is unlinked and likely unused

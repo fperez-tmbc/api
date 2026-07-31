@@ -490,11 +490,30 @@ it hadn't broken anything. The audit log is what caught it.
 > record. That passing result was wrongly read as exonerating the DNS change. **The SPF result in
 > `spamProcessingDetail` tells you nothing about whether a bypass policy matched.**
 >
-> **Fix, and the better pattern:** add the *whitelabel* domains to the bypass list
-> (`em3639.themyersbriggs.net`, `em7919.themyersbriggs.net`) instead of relying on the apex. Those
-> publish `v=spf1 ip4:168.245.48.216 -all`, so the bypass keys on **one** address rather than
-> SendGrid's shared `/17` (~32k addresses). Verified by sending a test through the same path:
-> `status: accepted` where it had been `rejected`.
+> **Fix — keep the bypass on the apex, and fix what the apex resolves to.** The bypass policy points
+> at `themyersbriggs.net` only, which is how every other TMBC domain's bypass is configured. What
+> changed is the apex SPF: it now carries `include:em3639.themyersbriggs.net` and
+> `include:em7919.themyersbriggs.net` in place of `include:sendgrid.net`. Those publish
+> `v=spf1 ip4:168.245.48.216 -all`, so the bypass resolves to **one dedicated IP** instead of
+> SendGrid's shared `/17` (~32,768 addresses of other customers' space).
+>
+> Two properties, and they are the whole point:
+>
+> - **Config consistency.** No per-domain special-casing in the policy layer. Every bypass policy has
+>   the same shape, so nobody has to remember which domains got whitelabel entries.
+> - **The load-bearing mechanism is self-documenting.** `include:sendgrid.net` looked exactly like
+>   removable vendor cruft with no observed traffic, which is why it got removed.
+>   `include:em3639.themyersbriggs.net` names the specific thing that needs it, in your own namespace.
+>
+> An interim fix — listing the whitelabels in the *policy* instead — also works and was verified, but
+> it scatters the dependency across policies rather than keeping it in DNS.
+>
+> Belt and braces: the SPF TXT record carries a Cloudflare comment, *"Mimecast Anti-Spoofing SPF
+> Bypass resolves this record. Do NOT remove the em* includes."* — visible in the dashboard where the
+> edit actually happens. Comment limit is low: 87 chars took, ~230 returned HTTP 400.
+>
+> Both arrangements verified by test send along the identical path (same header From, same `em3639`
+> envelope, same source IP): `status: accepted` where it had been `rejected`.
 >
 > Anti-spoofing config is **console-only**, not API-readable, so no API-side verification will ever
 > surface this dependency. It has to be checked by hand in
