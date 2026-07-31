@@ -567,6 +567,8 @@ Read authoritatively with `GET /data/Companies?$select=DataArea,Name`. Do not gu
 | `1000` | The Myers-Briggs Company | Parent |
 | `2100` | The Myers-Briggs Company Pty Ltd | **Australia** ("Pty Ltd" is the AU form) |
 | `2200` | The Myers-Briggs Company Pte. Ltd. | **Singapore** ("Pte. Ltd." is the SG form) |
+
+> **Pty vs Pte:** Singapor**e** ends in **e**, so Singapore is Pt**e**. Australia is the other one. Each abbreviation ends with the last letter of the term it shortens: Pt**y** = Proprietar**y** Limited (AU), Pt**e** = Privat**e** Limited (SG).
 | `3000` | TMBC EU Consolidation | Consolidation, not an operating entity |
 | `3100` | The Myers-Briggs Company Holdings (Europe) Limited | |
 | `3200` | TMBC Europe (OPPH) | |
