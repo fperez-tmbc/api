@@ -163,7 +163,6 @@ Category/subcategory values must match what's configured in the portal. Use `GET
   "request": {
     "closure_info": {
       "closure_code": {"name": "Success"},
-      "closure_comments": "Plain text summary of what was resolved.",
       "requester_ack_resolution": true
     }
   }
@@ -171,6 +170,10 @@ Category/subcategory values must match what's configured in the portal. Use `GET
 ```
 
 Use `PUT /requests/{internal_id}/close` with this as `input_data`.
+
+**`closure_comments` is optional — omit it.** The close succeeds with only `closure_code` + `requester_ack_resolution` (verified on ticket 101499, 2026-07-31: `status_code 2000`, `"Request(s) closed"`, and the field reads back `None`). It is a **separate field from `resolution`**, and TMBC does not use it — Frank has never left closure comments, so don't invent a summary to fill it. The resolution text set in the preceding `PUT /requests/{id}` is the record of the fix.
+
+Valid `closure_code` values in this portal: `Success`, `Resolved`, `Failed`, `Postponed`, `Rejected`, `Canceled`/`Cancelled`, `Moved`, `Unable to Reproduce`, `Closed - Completed`, `Closed - Approved`, `Closed - Canceled`, `Closed - Deferred`, `Closed - Rejected`, `Sprint Requirement`. Several appear duplicated in `GET /closure_codes`. `Success` is the normal choice.
 
 **The close endpoint only accepts `closure_info`.** Passing `resolution`, `category`, `subcategory`, or any other field returns `4001 EXTRA_KEY_FOUND_IN_JSON`. To set those fields when closing a ticket, make two separate calls: first `PUT /requests/{id}` to update category/subcategory/resolution, then `PUT /requests/{id}/close` with only `closure_info`.
 
