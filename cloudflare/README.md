@@ -58,7 +58,69 @@ requests.delete(f"https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_recor
     headers=HEADERS)
 ```
 
+## DNS Analytics — who is actually querying a record
+
+Answers "is this record still being used" without touching mail logs. A query for
+`s1._domainkey.example.com` only happens when a receiver validates a DKIM signature with `s=s1`;
+a query for a whitelabel envelope domain only happens when a receiver evaluates SPF on it.
+
+Use the **GraphQL** API (`POST /client/v4/graphql`), not the legacy REST endpoint:
+
+```graphql
+query($zone:String!,$since:Time!,$until:Time!){viewer{zones(filter:{zoneTag:$zone}){
+  dnsAnalyticsAdaptiveGroups(limit:2000,
+    filter:{datetime_geq:$since,datetime_leq:$until}, orderBy:[count_DESC]){
+      count dimensions{ queryName queryType responseCode datetimeHour }}}}}
+```
+
+**Token scope:** needs **Zone → Analytics → Read** (`com.cloudflare.api.account.zone.analytics.read`).
+Without it GraphQL returns an `authz` error naming the permission, and legacy REST returns a bare
+`10000 Authentication error`. A DNS-edit token does **not** include it. Editing an existing token's
+permissions does not change the token secret — no need to update `~/GitHub/.tokens/cloudflare`.
+
+Verified on a **Free** zone, 2026-07-31:
+
+| Behaviour | Detail |
+|---|---|
+| Max window | **1 week.** Wider requests fail: *"cannot request a time range wider than 1w"* |
+| Legacy REST | `/dns_analytics/report` caps at **6h** on Free (`1034`), and is best avoided |
+| Counts | **Quantised to multiples of 10 and sampled.** 31 real TXT queries reported as 30; 30 real A queries reported as **10**. Presence is reliable, magnitude is not — never cite these as exact volumes |
+| Ingestion lag | ~90 seconds |
+
+**NXDOMAIN queries ARE logged, so deleting a record does not blind you.** This is the key property:
+analytics is query-driven, not record-driven, and `responseCode` is a dimension. Proven three ways
+on one zone — a name that never existed logged 57,100 NXDOMAIN/week; a deliberately random name
+queried 61 times appeared ~90s later as NXDOMAIN; and a record created mid-window showed **both**
+NXDOMAIN (before) and NOERROR (after) under the same `queryName`. So you can remove a record and
+keep watching whether anything still asks for it, which is strictly better signal than leaving it
+published — every subsequent query is then a known-failed lookup.
+
+Interpretation traps:
+- **An "empty non-terminal" answers NOERROR, not NXDOMAIN.** `_domainkey.example.com` with
+  `s1._domainkey` beneath it exists in the DNS tree with no records of its own. Do not cite such a
+  name as evidence that non-existent names get logged.
+- **Absent from the result set ≠ zero.** Given sampling, a genuinely tiny trickle can fail to appear
+  at all. Distinguish "never queried" from "low volume" carefully.
+- **Selector probing inflates common names.** `s1`, `s2`, `selector1`, `default` and bare
+  `_domainkey` attract constant internet-wide scanning, so non-zero volume on them is not evidence
+  of live mail. Compare against an unusually-named sibling (e.g. SendGrid's `snd2`) which scanners
+  never guess and which sat at exactly 0. Mail-driven lookups also show a business-hours curve;
+  scanning is flat.
+
 ## Gotchas
 - A Worker with no routes and no custom domains is unlinked and likely unused
 - Zone ID must be looked up by name first — it's not the domain name itself
+- **Read-after-write race on PATCH/DELETE.** The API returns `success: true` and the new value, but
+  querying DNS within a second or two — *including the zone's own authoritative nameservers* — can
+  still return the old record. Re-check after a few seconds before concluding a change failed. This
+  produced two false "it didn't apply" reports on 2026-07-31.
+- **Query each zone's own authoritative nameservers.** Cloudflare assigns a different NS pair per
+  zone (`jim`/`monroe` for one, `moura`/`bryce` for another). Verifying zone B against zone A's
+  nameservers silently falls back to a cached recursive answer and reads as a stale result.
+- **Apex `NS` records in the zone are inert.** Imported zones often carry leftover registrar NS
+  records (e.g. `ns3.worldnic.com`). Cloudflare serves its own delegation regardless, so these are
+  cosmetic — confirm with `dig NS <zone> @<cloudflare-ns>` before assuming they do anything, and
+  they are safe to delete.
+- **`created_on` is the zone-import date** for bulk-imported records, not when the record was
+  authored. Do not date a record's origin from it.
 - **TXT record `content` MUST include surrounding double quotes** — always pass them explicitly in the JSON payload (e.g., `"content": "\"v=spf1 ...\""` ). Cloudflare may add them automatically if omitted, but this is not reliable and has caused malformed records in practice. This applies to SPF, DMARC, DKIM, and any other TXT record.

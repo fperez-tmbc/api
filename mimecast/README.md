@@ -279,12 +279,21 @@ curl -s -X POST "https://us-api.services.mimecast.com/api/message-finder/search"
        "advancedTrackAndTraceOptions":{"from":"no-reply@sns.amazonaws.com","route":"inbound"}}]}'
 ```
 
-- **Start date has a ~30 day cap.** Older values fail with
+- **Start date has a ~30 day cap, and it is strict to the day.** Older values fail with
   `err_track_and_trace_invalid_start_date` and an empty `data` array (`meta.status` is still 200 —
-  always check `fail[]`).
-- `message-finder/get-message-info` (pass the `id` from search) gives the definitive
-  `fromEnvelope` / `fromHeader` pair, plus `spamEvent`, `receiptEvent`, and the `policyInfo` list
-  showing which policies actually fired. Use `policyInfo` to confirm a new permit policy is matching.
+  always check `fail[]`). Verified 2026-07-31: a `start` of exactly 30 days back still failed;
+  back off a few days rather than probing one day at a time.
+- **`senderIP` is a first-class search key and is the way to attribute mail to a sending host.**
+  `advancedTrackAndTraceOptions: {"senderIP": "203.0.113.10"}` alone is a valid query and returns
+  `fromEnv`, `fromHdr`, `to`, `route`, `subject`, `status` per message. This is how you answer
+  "what is this IP in our SPF record actually sending" — see the worked example below.
+- `message-finder/get-message-info` (pass the `id` from search) is **less useful than it looks**.
+  Verified 2026-07-31 on an inbound archived message: `fromEnvelope` and `fromHeader` both came
+  back `null`, and the response carried only
+  `['deliveredMessage','id','recipientInfo','retentionInfo','spamInfo','status']` — no `spamEvent`,
+  no `receiptEvent`, no `policyInfo`. Do not rely on it for the envelope pair or for which policies
+  fired; take the envelope from `message-finder/search` (`fromEnv`) and the authentication verdict
+  from `archive/get-message-detail` headers instead.
 - `gateway/get-hold-message-list` returns held messages **directly as `data[]`** (not nested under a
   `heldMessages` key). Fields: `from` (envelope), `fromHeader`, `reason`, `reasonCode`, `policyInfo`.
 
@@ -353,6 +362,64 @@ body = {"data": [{"admin": True, "query": query}]}           # <-- admin:true is
 - Paging uses `meta.pagination.next` → pass back as `meta.pagination.pageToken`.
 - `archive/create-search` and `archive/get-search-results` are **`app_forbidden`**; only
   `archive/search` and `archive/get-archive-search-logs` are available.
+
+### Full headers — `archive/get-message-detail` (the DKIM/SPF/DMARC answer)
+
+**This is the only way to read a message's actual authentication result.** It returns the full
+header set, including `Authentication-Results` and the complete `Received` chain, plus
+`envelopeFrom` — which `archive/search` does not expose.
+
+The payload is fussy and fails in misleading ways. Verified 2026-07-31:
+
+```python
+# WORKS — the bare form. Defaults to context DELIVERED and returns everything.
+call("/api/archive/get-message-detail", {"data": [{"id": ARCHIVE_ID, "admin": True}]})
+```
+
+| Payload | Result |
+|---|---|
+| `{"id": <id>, "admin": true}` | **works** — full headers, `envelopeFrom`, `from`, `replyTo`, `messageBodyPreview` |
+| `{"id": <id>, "context": "archive", ...}` | `err_validation_value_not_allowed` — *"Field must be one of [DELIVERED,RECEIVED]"*. `"archive"` is the value `archive/search` uses; it is **not** valid here |
+| `{"id": <smash>, "admin": true}` | `xdk_failure 0007 Invalid token` — the `smash` hash is **not** interchangeable with `id` |
+| `wantHeaders: true` | not required; ignored |
+
+Empty `data: []` with `meta.status: 200` means the payload was rejected — **always read `fail[]`**,
+which carries the real error. An empty result here is never "no such message".
+
+Response shape:
+
+```python
+rec = det["data"][0]
+rec["envelopeFrom"]["emailAddress"]   # P1 / return-path
+rec["from"]["emailAddress"]           # P2 / header From
+rec["headers"]                        # list of {"name": ..., "values": [...]}
+rec["messageBodyPreview"]
+```
+
+Headers arrive as a list of dicts with `values` as a **list**, so join before regexing.
+
+**Worked example — attributing an SPF `ip4:` entry to a real application (2026-07-31).**
+Question: is `202.44.98.236` in `themyersbriggs.net`'s SPF still sending? Method:
+
+1. `message-finder/search` with `advancedTrackAndTraceOptions: {"senderIP": "202.44.98.236"}`
+   → 26 messages, `route: inbound`, `no-reply@themyersbriggs.net` → `accounts.ap@themyersbriggs.com`,
+   subjects `Invoice Payment Notification - NNNN`.
+2. `archive/search` on `<sent select="from">` + `<sent select="to">` to get the archive `id`.
+3. `archive/get-message-detail` → headers:
+
+```
+Authentication-Results: relay.mimecast.com;
+  dkim=none;
+  dmarc=pass (policy=quarantine) header.from=themyersbriggs.net;
+  spf=pass (... designates 202.44.98.236 as permitted sender)
+Received: from bp-dvmh-smtpr-02.inf.bulletproof.net (202.44.98.236) by relay.mimecast.com
+Received: from ap.themyersbriggs.com (10.30.15.1) by bp-dvmh-smtpr-02 (Postfix)
+Received: from cpp-dvmh-web-03 ([127.0.0.1]) by ap.themyersbriggs.com with Microsoft SMTPSVC
+```
+
+The `Received` chain is what identifies the originating app. `dkim=none` plus a `dmarc=pass` that
+rests only on SPF is the signature of a sender that will break on any forward — worth flagging
+whenever you see it, since it fails intermittently and per-recipient.
 
 ## Audit log — the change-history tool (`audit/get-audit-events`)
 
