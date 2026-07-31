@@ -497,7 +497,7 @@ it hadn't broken anything. The audit log is what caught it.
 > `v=spf1 ip4:168.245.48.216 -all`, so the bypass resolves to **one dedicated IP** instead of
 > SendGrid's shared `/17` (~32,768 addresses of other customers' space).
 >
-> Two properties, and they are the whole point:
+> Two properties this buys:
 >
 > - **Config consistency.** No per-domain special-casing in the policy layer. Every bypass policy has
 >   the same shape, so nobody has to remember which domains got whitelabel entries.
@@ -505,8 +505,18 @@ it hadn't broken anything. The audit log is what caught it.
 >   removable vendor cruft with no observed traffic, which is why it got removed.
 >   `include:em3639.themyersbriggs.net` names the specific thing that needs it, in your own namespace.
 >
-> An interim fix — listing the whitelabels in the *policy* instead — also works and was verified, but
-> it scatters the dependency across policies rather than keeping it in DNS.
+> **This is NOT a general "always fix it in DNS" rule — it is conditional on scope.** Frank,
+> 2026-07-31: *"The reason that I am okay with including the SendGrid em* domains in the SPF record is
+> because they are scoped down to 1 IP address that's assigned to us. If it were broader, then I would
+> have kept it inside the bypass policy."*
+>
+> | Include resolves to | Put it in |
+> |---|---|
+> | a narrow set of IPs **assigned to us** (`em3639` -> one dedicated IP) | the **apex SPF** |
+> | a vendor's **shared/broad** space (`sendgrid.net` -> 237,056 addresses) | the **bypass policy** |
+>
+> The apex SPF is a public statement about who may send as the bare domain. Widening it to a vendor's
+> shared range just to satisfy an anti-spoofing policy is the wrong trade — scope the policy instead.
 >
 > Belt and braces: the SPF TXT record carries a Cloudflare comment, *"Mimecast Anti-Spoofing SPF
 > Bypass resolves this record. Do NOT remove the em* includes."* — visible in the dashboard where the

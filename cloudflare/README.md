@@ -140,8 +140,10 @@ Checklist before removing an SPF mechanism:
    `include:vendor.com` with `include:<your-whitelabel>.<your-domain>` — you inherit the vendor's own
    record scoped to your account (often a single dedicated IP) instead of their whole shared space,
    and the mechanism stops looking like removable cruft.
-6. Leave the bypass policy pointed at the **apex**, consistent across domains, and fix what the apex
-   resolves to. Special-casing individual policies works but scatters the dependency.
+6. **Only put it in the apex if it resolves narrowly to IPs assigned to us.** If the include pulls in a
+   vendor's shared space, keep the dependency in the Mimecast bypass policy instead — the apex SPF is a
+   public statement about who may send as the bare domain, and should not be widened to a vendor's whole
+   range to satisfy an anti-spoofing policy. **Narrow -> DNS; broad -> policy.**
 7. Add a **record comment** naming the dependency — the only warning visible at the point of edit.
    Keep it short: 87 chars took, ~230 returned HTTP 400.
 
