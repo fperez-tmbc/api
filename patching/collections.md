@@ -6,19 +6,17 @@ Maps each PDQ collection to its patching requirements. Read this file at the sta
 
 **F5 rule:** Only the collections explicitly listed as "Yes" below require F5 commands. No other collection or list of computers needs F5 involvement unless explicitly stated at the time of the request.
 
-**PRTG rule:** Collections marked "Yes" suppress PRTG (pause root node `id=0`) for the duration of the run. `DEV/QA/VDI` is exempt — those machines don't carry production monitoring worth silencing, and pausing the root node for them would suppress the whole tree for no benefit. Ad-hoc machine lists follow the same default as their collection; when in doubt, suppress.
-
 **Collection resolution:** Collection names are NOT unique across PDQ — e.g. there are two collections named `PROD` (the real patch group `CPP Patch Groups\PROD` id 3236, and an empty `cpp-db.com\…\Servers\DC\PROD` id 3412). The patch loop resolves the target by `CollectionId` scoped to the `CPP Patch Groups` tree (`Name = '<collection>' AND Path LIKE 'CPP Patch Groups%'`) and aborts unless exactly one row matches. All patch groups live under `CPP Patch Groups`; names are unique within it. CollectionIds below are for reference — they can change if a collection is deleted and recreated, so the skill always re-resolves by name+path at runtime rather than trusting a hardcoded id.
 
-| Collection | CollectionId | F5 Required | F5 Config Key | PRTG Suppression |
-|---|---|---|---|---|
-| `Backup` | 3238 | No | — | Yes |
-| `DEV/QA/VDI` | 3233 | No | — | **No** |
-| `Domain Controllers - Group 1` | 3239 | No | — | Yes |
-| `Domain Controllers - Group 2` | 3528 | No | — | Yes |
-| `Web Staggered - Group 1` | 3246 | Yes | `web-staggered-first-group` | Yes |
-| `Web Staggered - Group 2` | 3545 | Yes | `web-staggered-second-group` | Yes |
-| `PROD` | 3236 | Yes | `prod-downtime` | Yes |
+| Collection | CollectionId | F5 Required | F5 Config Key |
+|---|---|---|---|
+| `Backup` | 3238 | No | — |
+| `DEV/QA/VDI` | 3233 | No | — |
+| `Domain Controllers - Group 1` | 3239 | No | — |
+| `Domain Controllers - Group 2` | 3528 | No | — |
+| `Web Staggered - Group 1` | 3246 | Yes | `web-staggered-first-group` |
+| `Web Staggered - Group 2` | 3545 | Yes | `web-staggered-second-group` |
+| `PROD` | 3236 | Yes | `prod-downtime` |
 
 ---
 
