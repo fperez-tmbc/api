@@ -4,14 +4,36 @@ Patterns, gotchas, and lessons learned for SSH access in the TMBC environment.
 
 ---
 
+## ⚠️ svcclaude is DECOMMISSIONED (2026-08-02)
+
+**The `svcclaude` account no longer exists.** Frank confirmed it was decommissioned. Authentication attempts fail with:
+
+```
+Permission denied (publickey,password,keyboard-interactive)
+```
+
+That error looks like a stale password or a key problem — it is neither. The account is gone. Two attempts were burned on SVVEEAMAVS01 on 2026-08-02 diagnosing this as a credential-rotation issue before Frank corrected it. **Do not retry svcclaude, and do not treat `~/GitHub/.tokens/svcclaude` as live** — that plaintext file is dead.
+
+**Use instead:**
+
+| Need | Method |
+|---|---|
+| Windows hosts in `cpp-db.com` | **WinRM as `CPP-DB\2fperez`** — `Invoke-Command -ComputerName <fqdn>`. Proven working 2026-08-02 on Veeam servers, DCs, and member servers. `2fperez` is a Domain Admin in cpp-db.com. |
+| Privileged creds | **Azure Key Vault `kv-tmbc-secrets`** — `~/GitHub/.tokens/kv-get.sh <secret>`. Per-domain DA secrets: `da-cpp-db-com`, `da-cpp-web-com`, `da-opp-local`, `da-oppashapp-local`, `da-oppnewapp-local`. Local admin: `local-admin-server-uk`, `local-admin-server-us`, `local-admin-tmbcadmin`. |
+| Hosts in other domains | Cross-domain WinRM **fails on Kerberos** from the admin workstation (opp.local, oppashapp.local, oppnewapp.local, cpp-web.com). Verify reachability by service port, or run from inside that domain. |
+
+**Key Vault gotcha:** the `da-*` secrets are **bare password strings**, not the `{username,password}` JSON used by other secrets. The account name is not stored. Ask Frank which account a `da-*` secret belongs to before authenticating — a wrong guess risks locking a domain admin across five domains.
+
+**Everything below that references `svcclaude` is retained for its transport-level patterns** (sshpass on Windows, askpass suppression, `-EncodedCommand`, legacy algorithm flags), which remain correct. Substitute a live account for `svcclaude` in every example. The PAN keys below are a separate question — confirm with Frank whether `svcclaude-key` / `svcclaude-key-rsa` are still installed on the firewalls before relying on them.
+
+---
+
 ## Credentials & Keys
 
-### svcclaude service account
-- **Creds file:** `~/GitHub/.tokens/svcclaude` (key=value format)
-- **Parse password safely:** `grep '^PASSWORD=' ~/GitHub/.tokens/svcclaude | cut -d'=' -f2-`
-  - Never `cat` the file and pass it whole — you'll get `PASSWORD=xxx` as the value, not just the password
-- **Ed25519 key (PAN-OS 11.x hosts):** `~/GitHub/.tokens/svcclaude-key`
-- **RSA 4096 key (PAN-OS 10.2.x hosts):** `~/GitHub/.tokens/svcclaude-key-rsa`
+### ~~svcclaude service account~~ — DECOMMISSIONED, see above
+- ~~**Creds file:** `~/GitHub/.tokens/svcclaude` (key=value format)~~ — dead
+- **Ed25519 key (PAN-OS 11.x hosts):** `~/GitHub/.tokens/svcclaude-key` — status unconfirmed post-decomm
+- **RSA 4096 key (PAN-OS 10.2.x hosts):** `~/GitHub/.tokens/svcclaude-key-rsa` — status unconfirmed post-decomm
   - PAN-OS 10.2.x rejects ed25519 — always use the RSA key for AUPAN and FRPAN
 
 ### Frank's personal key
@@ -48,6 +70,8 @@ SSHPASS="$PASS" sshpass -e /c/Windows/System32/OpenSSH/ssh.exe -o StrictHostKeyC
 ```
 
 **Why:** svcclaude's password worked on SVAZADSYNCDC01 even when key auth failed. Time was wasted on WinRM workarounds before trying the obvious fallback.
+
+> **Superseded 2026-08-02.** svcclaude is decommissioned, so this fallback no longer applies to that account. The inverse lesson now holds: when password auth fails on a Windows host, **try WinRM as `2fperez` before assuming a credential problem** — and check whether the account still exists before retrying at all. Repeated failed attempts against a dead or unknown account only risk lockouts.
 
 **Windows sshpass gotcha:** The WinGet sshpass binary (`/c/Users/.../WinGet/Links/sshpass`) is Win32-native and cannot hook into Git Bash's POSIX SSH (`/usr/bin/ssh`). Always point it at the Windows OpenSSH binary: `/c/Windows/System32/OpenSSH/ssh.exe`. Use `SSHPASS="$PASS" sshpass -e` (env var) rather than `-p` — more reliable across platforms.
 
