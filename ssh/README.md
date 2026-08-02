@@ -33,7 +33,7 @@ That error looks like a stale password or a key problem — it is neither. The a
 | `da-oppnewapp-local` | `#domain` | DA, oppnewapp.local | ✅ LDAP bind |
 | `local-admin-server-us` | `Administrator` | US servers (cpp-db.com) | ✅ SMB, SVFSHQ01 |
 | `local-admin-server-uk` | `2local` | UK servers (**opp.local**) | ✅ SMB, OXPDVSQL01 |
-| `local-admin-tmbcadmin` | `tmbcadmin` | UNKNOWN | ❌ account not found |
+| `local-admin-tmbcadmin` | `tmbcadmin` | LAPS default — VDI / LAPS-excluded only | ✅ SMB, VMDVALONSOP72 |
 
 **The account name is stored in each secret's Azure tags** (added 2026-08-02) so it never has to be reconstructed:
 
@@ -44,6 +44,10 @@ az keyvault secret list --vault-name kv-tmbc-secrets   --query "sort_by([].{secr
 **Gotcha:** the secret *values* are bare password strings, not the `{username,password}` JSON used by older vault entries — `kv-get.sh <name> username` will fail. Read the username from the tags.
 
 The `#` in `#domain` is literal. `ntsupport` and `#domain` are each DA in multiple domains, but **passwords are per-domain** — always pull the secret matching the target host's domain.
+
+**`local-admin-tmbcadmin` is a LAPS account — the KV value is only the *default* password.** `tmbcadmin` is pushed by PDQ then rotated by Windows LAPS on Intune-enrolled machines. **VDI VMs are excluded from the LAPS policy**, so they keep the default and the KV secret works there (verified on VMDVALONSOP72, VMJENKAGENT01). On LAPS-enrolled machines the KV value is stale by design — pull the current password from LAPS/Intune instead.
+
+On VDI VMs `tmbcadmin` is usually the **only** enabled local account (no local `Administrator`) — the inverse of the server estate, where you get `Administrator` and sometimes `2local`. When hunting for an account, sample the right *class* of machine rather than more servers.
 
 **UK vs US is decided by domain membership, not site prefix.** `2local` exists only on the `opp.local` estate; `SVFSMK02` sits on the same 10.30.16.x UK subnet but is joined to cpp-db.com and takes the *US* secret. Resolve a host's domain from PDQ Inventory `Computers.ADDomain`; never infer it from the hostname prefix.
 
