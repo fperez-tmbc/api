@@ -1,10 +1,15 @@
 # ============================================================================
-# ⚠️ USES THE DECOMMISSIONED `svcclaude` AD ACCOUNT — WILL FAIL AS WRITTEN
-# svcclaude was decommissioned 2026-08-02. Auth returns "Permission denied",
-# which looks like a bad password but is a removed account.
-# Replace with: WinRM as CPP-DB\2fperez, or a Key Vault cred
+# WARNING: uses `svcclaude`, whose AD rights were DISMANTLED 2026-07-27.
+# The account still EXISTS in cpp-db.com but has zero group memberships, zero
+# delegated ACEs, and was removed from local Administrators on ~26 machines.
+# It was DELETED outright in cpp-web.com, opp.local, oppashapp.local and
+# oppnewapp.local. Its password was ROTATED 2026-07-27, so the value in
+# ~/GitHub/.tokens/svcclaude is stale.
+# => This script will fail as written.
+# Use instead: WinRM as CPP-DB\2fperez, or a Key Vault domain-admin cred
 #   (~/GitHub/.tokens/kv-get.sh <secret>; usernames are in the secrets' tags).
-# NOTE: the PAN-OS local account named svcclaude is UNAFFECTED and still works.
+# STILL WORKING: the PAN-OS local account named svcclaude (key auth, verified
+# 2026-08-02) and svcclaude's vCenter login - the account is retained for those two.
 # See api/ssh/README.md.
 # ============================================================================
 

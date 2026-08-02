@@ -1,27 +1,32 @@
 # vSphere REST API — AVS vCenter Field Notes
 
-> ## ⚠️ `svcclaude` (AD account) was DECOMMISSIONED 2026-08-02
+
+> ## WARNING: `svcclaude`'s AD rights were dismantled 2026-07-27
 >
-> Every `svcclaude` example below that authenticates to **Windows/AD** is dead. The plaintext
-> `~/GitHub/.tokens/svcclaude` file is dead too. Auth fails with
-> `Permission denied` / `The user name or password is incorrect`, which reads like a stale
-> password but is a removed account — **do not retry it, and do not burn lockout budget on it.**
+> The account was **not deleted everywhere** — the picture is mixed, so read carefully:
+>
+> | Where | State |
+> |---|---|
+> | `cpp-db.com` | **Exists, but powerless** — zero group memberships, zero delegated ACEs, removed from local Administrators on ~26 machines. Retained *only* so vCenter and the PAN firewalls can authenticate it. |
+> | `cpp-web.com`, `opp.local`, `oppashapp.local`, `oppnewapp.local` | **Deleted outright.** |
+> | PAN-OS local account | ✅ **Still works** — firewalls have their own user database. Key auth verified 2026-08-02 (AVSPAN01, WHPAN01). |
+> | vCenter login | Retained by design — but see the password note below. |
+>
+> **Its password was rotated 2026-07-27**, so `~/GitHub/.tokens/svcclaude` holds a stale value.
+> That is why auth fails with `Permission denied` / `The user name or password is incorrect` —
+> it reads like a simple bad password, but the rights are gone too. **Do not retry it or burn
+> lockout budget on it.**
 >
 > **Use instead:**
 > - **WinRM as `CPP-DB\2fperez`** — `Invoke-Command -ComputerName <fqdn> -ScriptBlock {...}`.
->   `2fperez` is a Domain Admin in cpp-db.com. This is the proven day-to-day path.
-> - **Azure Key Vault `kv-tmbc-secrets`** for privileged creds — `~/GitHub/.tokens/kv-get.sh <secret>`.
->   Account names are stored in each secret's Azure **tags** (`username`, `scope`).
->   DA per domain: `ntsupport` (cpp-db.com, cpp-web.com), `#domain` (opp.local, oppashapp.local, oppnewapp.local).
->
-> Not every `svcclaude` reference is dead: the **PAN-OS local account of the same name still works**
-> (firewalls have their own user database). See `api/pan/README.md`.
+>   `2fperez` is a Domain Admin in cpp-db.com. The proven day-to-day path.
+> - **Azure Key Vault `kv-tmbc-secrets`** — `~/GitHub/.tokens/kv-get.sh <secret>`. Account names
+>   live in each secret's Azure **tags**. DA per domain: `ntsupport` (cpp-db.com, cpp-web.com),
+>   `#domain` (opp.local, oppashapp.local, oppnewapp.local).
 >
 > The transport-level patterns below (sshpass on Windows, `-EncodedCommand`, NetBIOS-vs-UPN,
 > loopback workarounds) remain correct — substitute a live account in the examples.
 > Full detail: `api/ssh/README.md`.
-
-
 
 ## Connection
 

@@ -4,15 +4,17 @@ Patterns, gotchas, and lessons learned for SSH access in the TMBC environment.
 
 ---
 
-## ⚠️ svcclaude is DECOMMISSIONED (2026-08-02)
+## ⚠️ svcclaude's AD rights were dismantled (2026-07-27)
 
-**The `svcclaude` account no longer exists.** Frank confirmed it was decommissioned. Authentication attempts fail with:
+**`svcclaude` is not a usable AD identity any more** — but it was not deleted everywhere, so be precise about it. Authentication fails with:
 
 ```
 Permission denied (publickey,password,keyboard-interactive)
 ```
 
-That error looks like a stale password or a key problem — it is neither. The account is gone. Two attempts were burned on SVVEEAMAVS01 on 2026-08-02 diagnosing this as a credential-rotation issue before Frank corrected it. **Do not retry svcclaude, and do not treat `~/GitHub/.tokens/svcclaude` as live** — that plaintext file is dead.
+**What actually happened on 2026-07-27:** every delegated ACE was removed from all five domain roots, group memberships were stripped in cpp-db.com, the account was **deleted outright** in cpp-web.com / opp.local / oppashapp.local / oppnewapp.local, it was removed from local Administrators on ~26 machines, and **its password was rotated**. In cpp-db.com the account still **exists but is powerless**, retained only so **vCenter and the PAN firewalls** can authenticate it.
+
+So the failure is both a stale password *and* absent rights — which is why it presents as an ordinary bad-password error. `~/GitHub/.tokens/svcclaude` holds the pre-rotation value and is useless. **Do not retry it or burn lockout budget on it.**
 
 **Use instead:**
 
@@ -63,18 +65,18 @@ net use \\$server\IPC$ /user:$server\$account "$pw"
 Enumerate before guessing an account name:
 `Invoke-Command -ComputerName <host> -Credential <verified DA> { Get-LocalUser | ? Enabled }`
 
-**Scope of the decommission:** it removed the **AD account** only. The identically-named **PAN-OS local account is unaffected and still works** (verified 2026-08-02) — see below. Everything further down that references `svcclaude` against *Windows/AD* hosts is retained for its transport-level patterns (sshpass on Windows, askpass suppression, `-EncodedCommand`, legacy algorithm flags), which remain correct — just substitute a live account in those examples.
+**Scope:** the teardown hit **AD rights and the password**. The **PAN-OS local account is untouched and still works** (verified 2026-08-02), and the cpp-db.com object is deliberately retained for **vCenter and PAN** — see below. Everything further down that references `svcclaude` against *Windows/AD* hosts is retained for its transport-level patterns (sshpass on Windows, askpass suppression, `-EncodedCommand`, legacy algorithm flags), which remain correct — just substitute a live account in those examples.
 
 ---
 
 ## Credentials & Keys
 
-### svcclaude — AD account DEAD, PAN firewall account ALIVE
+### svcclaude — AD identity unusable, PAN firewall account ALIVE
 
-**These are two different accounts that happen to share a name. Do not conflate them.**
+**Two different identities share this name. Do not conflate them.**
 
-- ❌ **AD account `CPP-DB\svcclaude`** — decommissioned, see above. `~/GitHub/.tokens/svcclaude` (the `USERNAME`/`PASSWORD` file) is dead.
-- ✅ **PAN-OS local account `svcclaude`** — **still valid and working.** Firewalls keep their own local user database, so the AD decommission did not touch it. Verified 2026-08-02 against AVSPAN01 and WHPAN01 — key auth succeeded and returned the `svcclaude@AVSPAN01(active)>` prompt.
+- ❌ **AD account `CPP-DB\svcclaude`** — still exists in cpp-db.com but stripped of all groups and ACEs, removed from local Administrators everywhere, and **password rotated 2026-07-27**. Deleted outright in the other four domains. `~/GitHub/.tokens/svcclaude` holds the pre-rotation password and is useless. Retained purely so **vCenter** and the **PAN firewalls** can still authenticate it — not for general AD or server work.
+- ✅ **PAN-OS local account `svcclaude`** — **still valid and working.** Firewalls keep their own local user database, so none of the AD teardown touched it. Verified 2026-08-02 against AVSPAN01 and WHPAN01 — key auth succeeded and returned the `svcclaude@AVSPAN01(active)>` prompt.
   - **Ed25519 key (PAN-OS 11.x — AVSPAN, WHPAN, DCPANORAMA01):** `~/GitHub/.tokens/svcclaude-key`
   - **RSA 4096 key (PAN-OS 10.2.x — AUPAN, FRPAN):** `~/GitHub/.tokens/svcclaude-key-rsa`
   - PAN-OS 10.2.x rejects ed25519 — always use the RSA key for AUPAN and FRPAN
