@@ -53,7 +53,7 @@ The `#` in `#domain` is literal. `ntsupport` and `#domain` are each DA in multip
 # Domain account - LDAP bind
 $de = New-Object System.DirectoryServices.DirectoryEntry("LDAP://$dc", "$user@$domain", $pw); $null = $de.NativeObject
 # Local account - SMB. Local accounts cannot use Kerberos, so WinRM/Negotiate will NOT work.
-net use \$server\IPC$ /user:$server\$account "$pw"
+net use \\$server\IPC$ /user:$server\$account "$pw"
 ```
 
 Enumerate before guessing an account name:
