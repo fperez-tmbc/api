@@ -19,10 +19,25 @@ That error looks like a stale password or a key problem — it is neither. The a
 | Need | Method |
 |---|---|
 | Windows hosts in `cpp-db.com` | **WinRM as `CPP-DB\2fperez`** — `Invoke-Command -ComputerName <fqdn>`. Proven working 2026-08-02 on Veeam servers, DCs, and member servers. `2fperez` is a Domain Admin in cpp-db.com. |
-| Privileged creds | **Azure Key Vault `kv-tmbc-secrets`** — `~/GitHub/.tokens/kv-get.sh <secret>`. Per-domain DA secrets: `da-cpp-db-com`, `da-cpp-web-com`, `da-opp-local`, `da-oppashapp-local`, `da-oppnewapp-local`. Local admin: `local-admin-server-uk`, `local-admin-server-us`, `local-admin-tmbcadmin`. |
+| Privileged creds | **Azure Key Vault `kv-tmbc-secrets`** — `~/GitHub/.tokens/kv-get.sh <secret>`. See the secret→account table below. |
 | Hosts in other domains | Cross-domain WinRM **fails on Kerberos** from the admin workstation (opp.local, oppashapp.local, oppnewapp.local, cpp-web.com). Verify reachability by service port, or run from inside that domain. |
 
-**Key Vault gotcha:** the `da-*` secrets are **bare password strings**, not the `{username,password}` JSON used by other secrets. The account name is not stored. Ask Frank which account a `da-*` secret belongs to before authenticating — a wrong guess risks locking a domain admin across five domains.
+### Key Vault secret → account map (confirmed 2026-08-02)
+
+| Secret | Account | Scope |
+|---|---|---|
+| `da-cpp-db-com` | `ntsupport` | DA, cpp-db.com |
+| `da-cpp-web-com` | `ntsupport` | DA, cpp-web.com |
+| `da-opp-local` | `#domain` | DA, opp.local |
+| `da-oppashapp-local` | `#domain` | DA, oppashapp.local |
+| `da-oppnewapp-local` | `#domain` | DA, oppnewapp.local |
+| `local-admin-server-us` | `Administrator` | local admin, US servers |
+| `local-admin-server-uk` | `2local` *or* `Administrator` | local admin, UK servers — **unconfirmed**, try `2local` first |
+| `local-admin-tmbcadmin` | `tmbcadmin` | local admin |
+
+**Gotcha:** these secrets are **bare password strings**, not the `{username,password}` JSON used by older vault entries — `kv-get.sh <name> username` will fail. The account names exist only in this table, so keep it current.
+
+The `#` in `#domain` is literal. `ntsupport` and `#domain` are each DA in multiple domains, but **passwords are per-domain** — always pull the secret matching the target host's domain. Resolve a host's domain from PDQ Inventory `Computers.ADDomain`; never infer it from the hostname prefix.
 
 **Everything below that references `svcclaude` is retained for its transport-level patterns** (sshpass on Windows, askpass suppression, `-EncodedCommand`, legacy algorithm flags), which remain correct. Substitute a live account for `svcclaude` in every example. The PAN keys below are a separate question — confirm with Frank whether `svcclaude-key` / `svcclaude-key-rsa` are still installed on the firewalls before relying on them.
 
