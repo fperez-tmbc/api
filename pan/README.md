@@ -1,5 +1,17 @@
 # PAN-OS XML API Field Notes
 
+> ## ℹ️ `svcclaude` on PAN-OS is NOT affected by the AD decommission
+>
+> The **AD account** `CPP-DB\svcclaude` was decommissioned 2026-08-02, but PAN firewalls keep their
+> own local user database, so the identically-named **PAN-OS local account is still valid**.
+> Verified 2026-08-02 against AVSPAN01 and WHPAN01 — key auth succeeded and returned the
+> `svcclaude@AVSPAN01(active)>` prompt.
+>
+> **Keep using `~/GitHub/.tokens/svcclaude-key` (ed25519) and `svcclaude-key-rsa` (RSA 4096).**
+> Nothing in this document needs to change. Do not "fix" it by swapping in an AD account.
+
+
+
 > **Patching / upgrade runbooks and scripts** live in the task-tracker project folder:
 > `~/GitHub/task-tracker/projects/pan/pan-patching/`
 

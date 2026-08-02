@@ -63,17 +63,23 @@ net use \\$server\IPC$ /user:$server\$account "$pw"
 Enumerate before guessing an account name:
 `Invoke-Command -ComputerName <host> -Credential <verified DA> { Get-LocalUser | ? Enabled }`
 
-**Everything below that references `svcclaude` is retained for its transport-level patterns** (sshpass on Windows, askpass suppression, `-EncodedCommand`, legacy algorithm flags), which remain correct. Substitute a live account for `svcclaude` in every example. The PAN keys below are a separate question — confirm with Frank whether `svcclaude-key` / `svcclaude-key-rsa` are still installed on the firewalls before relying on them.
+**Scope of the decommission:** it removed the **AD account** only. The identically-named **PAN-OS local account is unaffected and still works** (verified 2026-08-02) — see below. Everything further down that references `svcclaude` against *Windows/AD* hosts is retained for its transport-level patterns (sshpass on Windows, askpass suppression, `-EncodedCommand`, legacy algorithm flags), which remain correct — just substitute a live account in those examples.
 
 ---
 
 ## Credentials & Keys
 
-### ~~svcclaude service account~~ — DECOMMISSIONED, see above
-- ~~**Creds file:** `~/GitHub/.tokens/svcclaude` (key=value format)~~ — dead
-- **Ed25519 key (PAN-OS 11.x hosts):** `~/GitHub/.tokens/svcclaude-key` — status unconfirmed post-decomm
-- **RSA 4096 key (PAN-OS 10.2.x hosts):** `~/GitHub/.tokens/svcclaude-key-rsa` — status unconfirmed post-decomm
+### svcclaude — AD account DEAD, PAN firewall account ALIVE
+
+**These are two different accounts that happen to share a name. Do not conflate them.**
+
+- ❌ **AD account `CPP-DB\svcclaude`** — decommissioned, see above. `~/GitHub/.tokens/svcclaude` (the `USERNAME`/`PASSWORD` file) is dead.
+- ✅ **PAN-OS local account `svcclaude`** — **still valid and working.** Firewalls keep their own local user database, so the AD decommission did not touch it. Verified 2026-08-02 against AVSPAN01 and WHPAN01 — key auth succeeded and returned the `svcclaude@AVSPAN01(active)>` prompt.
+  - **Ed25519 key (PAN-OS 11.x — AVSPAN, WHPAN, DCPANORAMA01):** `~/GitHub/.tokens/svcclaude-key`
+  - **RSA 4096 key (PAN-OS 10.2.x — AUPAN, FRPAN):** `~/GitHub/.tokens/svcclaude-key-rsa`
   - PAN-OS 10.2.x rejects ed25519 — always use the RSA key for AUPAN and FRPAN
+
+Keep using the PAN keys. See `api/pan/README.md`.
 
 ### Frank's personal key
 - `~/.ssh/id_ed25519` — used for SVDCDC01 and general domain hosts

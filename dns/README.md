@@ -1,5 +1,28 @@
 # Windows DNS — Field Notes
 
+> ## ⚠️ `svcclaude` (AD account) was DECOMMISSIONED 2026-08-02
+>
+> Every `svcclaude` example below that authenticates to **Windows/AD** is dead. The plaintext
+> `~/GitHub/.tokens/svcclaude` file is dead too. Auth fails with
+> `Permission denied` / `The user name or password is incorrect`, which reads like a stale
+> password but is a removed account — **do not retry it, and do not burn lockout budget on it.**
+>
+> **Use instead:**
+> - **WinRM as `CPP-DB\2fperez`** — `Invoke-Command -ComputerName <fqdn> -ScriptBlock {...}`.
+>   `2fperez` is a Domain Admin in cpp-db.com. This is the proven day-to-day path.
+> - **Azure Key Vault `kv-tmbc-secrets`** for privileged creds — `~/GitHub/.tokens/kv-get.sh <secret>`.
+>   Account names are stored in each secret's Azure **tags** (`username`, `scope`).
+>   DA per domain: `ntsupport` (cpp-db.com, cpp-web.com), `#domain` (opp.local, oppashapp.local, oppnewapp.local).
+>
+> Not every `svcclaude` reference is dead: the **PAN-OS local account of the same name still works**
+> (firewalls have their own user database). See `api/pan/README.md`.
+>
+> The transport-level patterns below (sshpass on Windows, `-EncodedCommand`, NetBIOS-vs-UPN,
+> loopback workarounds) remain correct — substitute a live account in the examples.
+> Full detail: `api/ssh/README.md`.
+
+
+
 Internal DNS updates via SSH + PowerShell DnsServer cmdlets.
 
 ## Setup Requirements

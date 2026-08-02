@@ -1,3 +1,13 @@
+# ============================================================================
+# ⚠️ USES THE DECOMMISSIONED `svcclaude` AD ACCOUNT — WILL FAIL AS WRITTEN
+# svcclaude was decommissioned 2026-08-02. Auth returns "Permission denied",
+# which looks like a bad password but is a removed account.
+# Replace with: WinRM as CPP-DB\2fperez, or a Key Vault cred
+#   (~/GitHub/.tokens/kv-get.sh <secret>; usernames are in the secrets' tags).
+# NOTE: the PAN-OS local account named svcclaude is UNAFFECTED and still works.
+# See api/ssh/README.md.
+# ============================================================================
+
 # grant-dns-acl.ps1 - Grant svcclaude Full Control on all AD-integrated DNS zones
 #
 # Run once as a domain admin on any DC in the target domain.
