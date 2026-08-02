@@ -73,6 +73,21 @@ curl -sk -o /dev/null -w "%{http_code}" \
 | `/api/simulate.htm` | Simulate sensor error | `id=<sensorid>`, `action=1` — only works on Up/Warning/Unusual/Unknown sensors |
 | `/api/discovernow.htm` | Force auto-discovery | `id=<groupid\|deviceid>`, `template=<filename>` (optional) |
 
+#### Maintenance-window suppression
+
+Pause the **root group (`id=0`)** to suppress the whole tree — used by the `/patching` flow for every patch run.
+
+```bash
+TOKEN=$(tr -d '[:space:]' < ~/GitHub/.tokens/prtg)
+BASE="https://prtg.themyersbriggs.com/api"
+# Suppress (auto-resumes after duration — failsafe if the caller dies)
+curl -sk -o /dev/null -w "%{http_code}\n" "${BASE}/pauseobjectfor.htm?id=0&duration=480&pausemsg=Patch%20window&apitoken=${TOKEN}"
+# Resume early
+curl -sk -o /dev/null -w "%{http_code}\n" "${BASE}/pause.htm?id=0&action=1&apitoken=${TOKEN}"
+```
+
+Prefer `pauseobjectfor.htm` over `pause.htm?action=0` for maintenance: an indefinite pause leaves monitoring dark forever if the automation dies. Children with their **own** user-pause keep it when the parent resumes; children that were only "paused by parent" come back. Snapshot the paused set before pausing and diff it after resuming to confirm.
+
 ### Object Management
 
 | Endpoint | Purpose | Key params |
@@ -161,7 +176,8 @@ PRTG does not support adding individual AD users — access is group-based:
 
 ## Gotchas
 
-- Action endpoints return **302** on success (not 200) — use `-w "%{http_code}"` to verify
+- **Bearer header fails with 401 on action endpoints** (confirmed on `pauseobjectfor.htm`, 25.1.102.1373) even though the same token works fine as `apitoken=` on `table.json`. Use the `apitoken=` query param for actions; treat the "Bearer preferred" note above as read-only guidance.
+- Action endpoints usually return **302** on success (not 200) — but `pauseobjectfor.htm` returns **200**. Accept either; verify the resulting object state rather than trusting the code alone.
 - `acknowledge.htm` does NOT exist — the correct endpoint is `acknowledgealarm.htm`
 - `action=0` on `pause.htm` pauses; `action=1` resumes — counterintuitive
 - `simulate.htm` requires `action=1` and only works on Up/Warning/Unusual/Unknown sensors
