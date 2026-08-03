@@ -23,8 +23,8 @@
 | AVSPAN02 | | AVS firewall (passive) | PA-VM (VM-300) | 11.2.13 | `https://avspan02.cpp-db.com/api/` | `~/.tokens/pan-avs` (same — HA pair shares token) |
 | WHPAN01 | | WH firewall (active) | PA-460 | 11.2.13 | `https://whpan01.cpp-db.com/api/` | `~/.tokens/pan-wh` |
 | WHPAN02 | | WH firewall (passive) | PA-460 | 11.2.13 | `https://whpan02.cpp-db.com/api/` | `~/.tokens/pan-wh` (same — HA pair shares token) |
-| AUPAN01 | | AU firewall (active) | PA-220 | 10.2.18-h9 | `https://aupan01.cpp-db.com/api/` | `~/.tokens/pan-au` |
-| AUPAN02 | | AU firewall (passive) | PA-220 | 10.2.18-h9 | `https://aupan02.cpp-db.com/api/` | `~/.tokens/pan-au` (same — HA pair shares token) |
+| AUPAN01 | 012801036554 | AU firewall (active) | PA-220 | 10.2.18-h9 | `https://aupan01.cpp-db.com/api/` | `~/.tokens/pan-au` |
+| AUPAN02 | 012801036577 | AU firewall (passive) | PA-220 | 10.2.18-h9 | `https://aupan02.cpp-db.com/api/` | `~/.tokens/pan-au` (same — HA pair shares token) |
 | FRPAN01 | 012801036562 | FR firewall (active) | PA-220 | 10.2.18-h9 | `https://frpan01.cpp-db.com/api/` | `~/.tokens/pan-fr` |
 | FRPAN02 | 012801036206 | FR firewall (passive) | PA-220 | 10.2.18-h9 | `https://frpan02.cpp-db.com/api/` | `~/.tokens/pan-fr` (same — HA pair shares token) |
 | DCPANORAMA01 | | Panorama management | Panorama (VM) | 11.2.12 (unverified) | `https://dcpanorama01.cpp-db.com/api/` | `~/.tokens/pan-panorama` |
@@ -278,9 +278,18 @@ matching `authcode` values and Aug 04 2027 expiries. Confirms the renewal behavi
 | FR (both peers) | Adv Threat Prevention, Premium, Threat Prevention | Aug 4, 2027 |
 
 Notes:
-- **AU expires Aug 4 2026** and no renewal order has been seen. The AU office is closing in 2026
-  and the AU servers are being decommissioned, so this may well be deliberate — confirm with Frank
-  rather than assuming a renewal is owed.
+- **AU expired Aug 4 2026 — deliberately not renewed.** Confirmed with Frank 2026-08-03: the AU
+  office shuts down later in 2026 and all AU licenses are being allowed to lapse. Do not open
+  renewal tickets for AU. Its content/AV/URL-filtering are frozen as of that date; final content
+  version is `9128-10169` (see below).
+- **AU content is permanently stuck at 9128-10169** (Jul 23 2026) — the PAN-300055 disk bug blocked
+  the `9131-10176` install and the fix needs a TAC root session, which expired with Premium support.
+  Full write-up in `knowledge-base/procedures/pan-pa220-disk-cleanup.md`. This is a known accepted
+  state, not something to re-investigate.
+- **Checking versions on a PA-220 whose content is stuck:** `current=no` in
+  `<request><content><upgrade><info/></upgrade></content></request>` means "not running", which
+  includes newer downloaded-but-not-installed packages. Never feed that flag straight into a
+  cleanup — see the warning in the disk-cleanup procedure.
 - **FR URL Filtering (Feb 5 2027)** is on a different cycle than FR threat/support (Aug 4 2027).
   Two separate renewals per year for that site.
 - WH shows an expired **Software warranty** (Feb 20, 2022). Cosmetic on a PA-460 under active
