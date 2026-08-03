@@ -17,19 +17,26 @@
 
 ## Devices & Tokens
 
-| Device | Role | Model | PAN-OS Version | Base URL | Token file |
-|--------|------|-------|----------------|----------|------------|
-| AVSPAN01 | AVS firewall (active) | PA-VM (VM-300) | 11.2.12 | `https://avspan01.cpp-db.com/api/` | `~/.tokens/pan-avs` |
-| AVSPAN02 | AVS firewall (passive) | PA-VM (VM-300) | 11.2.12 | `https://avspan02.cpp-db.com/api/` | `~/.tokens/pan-avs` (same — HA pair shares token) |
-| WHPAN01 | WH firewall (active) | PA-460 | 11.2.12 | `https://whpan01.cpp-db.com/api/` | `~/.tokens/pan-wh` |
-| WHPAN02 | WH firewall (passive) | PA-460 | 11.2.12 | `https://whpan02.cpp-db.com/api/` | `~/.tokens/pan-wh` (same — HA pair shares token) |
-| AUPAN01 | AU firewall (active) | PA-220 | 10.2.18-h6 | `https://aupan01.cpp-db.com/api/` | `~/.tokens/pan-au` |
-| AUPAN02 | AU firewall (passive) | PA-220 | 10.2.18-h6 | `https://aupan02.cpp-db.com/api/` | `~/.tokens/pan-au` (same — HA pair shares token) |
-| FRPAN01 | FR firewall (active) | PA-220 | 10.2.18-h6 | `https://frpan01.cpp-db.com/api/` | `~/.tokens/pan-fr` |
-| FRPAN02 | FR firewall (passive) | PA-220 | 10.2.18-h6 | `https://frpan02.cpp-db.com/api/` | `~/.tokens/pan-fr` (same — HA pair shares token) |
-| DCPANORAMA01 | Panorama management | Panorama (VM) | 11.2.12 | `https://dcpanorama01.cpp-db.com/api/` | `~/.tokens/pan-panorama` |
+| Device | Serial | Role | Model | PAN-OS Version | Base URL | Token file |
+|--------|--------|------|-------|----------------|----------|------------|
+| AVSPAN01 | | AVS firewall (active) | PA-VM (VM-300) | 11.2.13 | `https://avspan01.cpp-db.com/api/` | `~/.tokens/pan-avs` |
+| AVSPAN02 | | AVS firewall (passive) | PA-VM (VM-300) | 11.2.13 | `https://avspan02.cpp-db.com/api/` | `~/.tokens/pan-avs` (same — HA pair shares token) |
+| WHPAN01 | | WH firewall (active) | PA-460 | 11.2.13 | `https://whpan01.cpp-db.com/api/` | `~/.tokens/pan-wh` |
+| WHPAN02 | | WH firewall (passive) | PA-460 | 11.2.13 | `https://whpan02.cpp-db.com/api/` | `~/.tokens/pan-wh` (same — HA pair shares token) |
+| AUPAN01 | | AU firewall (active) | PA-220 | 10.2.18-h9 | `https://aupan01.cpp-db.com/api/` | `~/.tokens/pan-au` |
+| AUPAN02 | | AU firewall (passive) | PA-220 | 10.2.18-h9 | `https://aupan02.cpp-db.com/api/` | `~/.tokens/pan-au` (same — HA pair shares token) |
+| FRPAN01 | 012801036562 | FR firewall (active) | PA-220 | 10.2.18-h9 | `https://frpan01.cpp-db.com/api/` | `~/.tokens/pan-fr` |
+| FRPAN02 | 012801036206 | FR firewall (passive) | PA-220 | 10.2.18-h9 | `https://frpan02.cpp-db.com/api/` | `~/.tokens/pan-fr` (same — HA pair shares token) |
+| DCPANORAMA01 | | Panorama management | Panorama (VM) | 11.2.12 (unverified) | `https://dcpanorama01.cpp-db.com/api/` | `~/.tokens/pan-panorama` |
 
-_Versions last verified: 2026-05-27_
+_Versions last verified: 2026-08-02 — all 8 firewalls confirmed live via `show system info`.
+DCPANORAMA01 was **not** reachable that date (empty API response, no ICMP), so its 11.2.12 entry
+is stale-as-of-2026-05-27, not a current reading. See `project-panorama-decommission` before
+treating that as a fault._
+
+Serial column is filled in as devices get audited — populated ones are confirmed from
+`show system info`, blanks just mean not yet recorded. Serials matter for CSP licensing work
+(auth codes are issued per-serial).
 
 - PA-220 (AUPAN, FRPAN) max supported PAN-OS is 10.2.x — no upgrade path to 11.x exists
 
@@ -210,6 +217,76 @@ printf 'set cli pager off\ndelete global-protect-client version 6.3.3-c915\nexit
   word-split unquoted scalars, so the entire string lands in `-i` ("Identity file … not
   accessible" → "Too many authentication failures"). Use a zsh array
   (`opts=(-o A -o B …); ssh -i KEY "${opts[@]}" …`) or inline every flag.
+
+---
+
+## Licensing / Subscription Renewals
+
+### Check what's licensed and when it expires (API op — read-only)
+
+```
+type=op  cmd=<request><license><info></info></license></request>
+```
+
+Each `<entry>` carries `feature`, `expires`, `expired`, and `authcode` — so you can match an auth
+code from a Palo Alto order confirmation straight against what the box actually has.
+
+### Renewals do NOT need to be applied to the firewall
+
+This is the big one. When a `PAN-*-R` (renewal) auth code arrives by email from
+`ORDERS@PALOALTONETWORKS.COM`, **there is nothing to do on the device.** Palo Alto applies the
+renewal to the CSP entitlement and the firewall picks up the new expiry on its own. The order PDF
+says so explicitly: _"Subscription and support renewals do not need to be re-activated; therefore,
+no further action is required."_ Same for converting an eval to production.
+
+Do not run `request license fetch` or paste renewal codes into the GUI expecting to "activate"
+them. Just verify with `request license info` that the expiry moved out.
+
+New (non-renewal) subscriptions and hardware registrations DO require activation.
+
+### Auth codes are issued per-serial
+
+An order confirmation lists one auth code per serial per SKU. For an HA pair that means the codes
+come in matched sets — 2 peers × 2 SKUs = 4 codes — and each code is bound to one serial. Always
+map code → serial before assuming an order covers the pair; the serial column in
+**Devices & Tokens** above is there for exactly this. Don't infer which site an order is for from
+the site name, because the email/PDF only identifies devices by serial.
+
+### Worked example — order 41062928 (FR pair, verified 2026-08-02)
+
+Renewal of ATP + Premium support on the FR PA-220s, covering 08/04/2026 – 08/03/2027:
+
+| Auth Code | Part Number | Serial | Device |
+|-----------|-------------|--------|--------|
+| 33930938 | PAN-PA-220-ATP-R | 012801036562 | FRPAN01 |
+| 32594197 | PAN-SVC-PREM-220-R | 012801036562 | FRPAN01 |
+| 31760800 | PAN-PA-220-ATP-R | 012801036206 | FRPAN02 |
+| 61840664 | PAN-SVC-PREM-220-R | 012801036206 | FRPAN02 |
+
+All four were already live on the devices with no action taken — `request license info` showed the
+matching `authcode` values and Aug 04 2027 expiries. Confirms the renewal behavior above.
+
+### Fleet expiry snapshot (verified 2026-08-02)
+
+| Site | Features | Expires |
+|------|----------|---------|
+| AVS (both peers) | Adv Threat Prevention, PA-VM, Premium, Threat Prevention | Dec 25, 2026 |
+| WH (both peers) | PAN-DB URL Filtering, Threat Prevention | Dec 29, 2026 |
+| WH (both peers) | Premium | Nov 20, 2026 |
+| AU (both peers) | PAN-DB URL Filtering, Premium, Threat Prevention | **Aug 4, 2026** |
+| FR (both peers) | Adv URL Filtering, PAN-DB URL Filtering | Feb 5, 2027 |
+| FR (both peers) | Adv Threat Prevention, Premium, Threat Prevention | Aug 4, 2027 |
+
+Notes:
+- **AU expires Aug 4 2026** and no renewal order has been seen. The AU office is closing in 2026
+  and the AU servers are being decommissioned, so this may well be deliberate — confirm with Frank
+  rather than assuming a renewal is owed.
+- **FR URL Filtering (Feb 5 2027)** is on a different cycle than FR threat/support (Aug 4 2027).
+  Two separate renewals per year for that site.
+- WH shows an expired **Software warranty** (Feb 20, 2022). Cosmetic on a PA-460 under active
+  Premium support; not a gap to chase.
+- FR now carries **Advanced** Threat Prevention on both peers, not classic-only. Earlier notes
+  claiming ATP is AVS-exclusive are out of date.
 
 ---
 
