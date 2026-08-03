@@ -421,6 +421,49 @@ The `Received` chain is what identifies the originating app. `dkim=none` plus a 
 rests only on SPF is the signature of a sender that will break on any forward — worth flagging
 whenever you see it, since it fails intermittently and per-recipient.
 
+### Full message bodies and attachments — `archive/get-file`
+
+**`messageBodyPreview` is hard-capped at 100 characters.** It is a list-view teaser, not the body.
+Verified 2026-08-03 across 12 messages: every one returned exactly 100 chars, whether the message was
+21 KB or 1.4 MB. There is no `wantBody` flag and no other body field on the detail response, so
+`get-message-detail` alone can never answer "what did this email say".
+
+**`archive/get-file` is the answer, and it accepts either an attachment id or a message id:**
+
+| `data[0].id` | What you get |
+|---|---|
+| an `attachments[].id` from `get-message-detail` | that attachment's bytes |
+| the **message** `id` (the same one `get-message-detail` takes) | the complete **`.eml`** — all headers, all MIME parts |
+
+The message-id form is the only way to read a full body; parse the result with Python's `email` module.
+Unlike `get-message-detail`, the `smash` hash is still not interchangeable with `id`.
+
+**It returns JSON containing short-lived pre-signed URLs, NOT the file bytes.** Always two steps:
+
+```python
+r = call("/api/archive/get-file", {"data": [{"id": file_or_message_id}]})
+url = r["data"][0]["urls"][0]        # us-a1.download.api.services.mimecast.com
+blob = urllib.request.urlopen(url).read()
+```
+
+The URL carries its own credentials in a `context` blob, so do **not** send the bearer token on the
+download GET. `admin: true` is accepted but not required. If you write the JSON response straight to
+disk you get a ~3.7 KB file starting `{"meta":` instead of the PDF you expected.
+
+### `attachmentcount` undercounts — enumerate `get-message-detail` instead
+
+The `archive/search` return-field `attachmentcount` counts only conventional attachments and skips
+inline / `cid:` parts. Verified 2026-08-03 on a 12-message vendor thread: search reported 12
+attachments in total, `get-message-detail` listed 21. One 1 MB message reported `attachmentcount=0`
+while carrying four inline PNGs. **Never conclude "no attachments" from a search row** — read
+`get-message-detail` → `attachments[]`, which carries `filename`, `size`, `extension`, `contentId`,
+`contentType`, `bodyType` and `sha256`.
+
+Use `sha256` to collapse a thread before downloading. Quoted signature images reappear on every reply
+with a different `id` and sometimes a different filename but an identical hash — in that thread the
+same Crayon banner appeared 10 times under 3 filenames, and 21 attachment slots held only 7 unique
+files.
+
 ## Audit log — the change-history tool (`audit/get-audit-events`)
 
 **Best available answer to "what changed, when, and who did it."** Requires `startDateTime` and
