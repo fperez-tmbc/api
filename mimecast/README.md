@@ -382,14 +382,32 @@ Two things worth carrying forward:
 `Administration → Gateway → Policies` → `Relaxed - Ignore Graymail`
 (Message Scan Definition `Relaxed - Ignore Graymail`, group `Ignore Graymail - Company`).
 
-**A Permitted Senders permit does not stop a graymail hold.** Proof in-tenant: `hr.sage@themyersbriggs.co`
-sends with envelope `themyersbriggs.co`, which the `Permitted senders` group already covers under the
-envelope-only default policy, and it *still* had to be added to `Ignore Graymail - Company`. When a
-sender is held with `spamScore: 0` and everything in `spamProcessingDetail` reading `allow: true`,
-reach for the graymail group, not a permit.
-
-The graymail lever is also the **safer** one: a permit grants a full spam-scanning bypass, whereas a
-graymail entry only turns off graymail classification. The message is still spam-scanned.
+> ### ⚠ A PERMIT is what stops these holds. Graymail status is a red herring.
+>
+> Measured 2026-08-04 against a 90-message random sample of the held queue, plus the full queue:
+>
+> ```
+> permittedSender.info on HELD messages:  none 88,  ignored 2,  whitelist 0
+> greyEmail            on HELD messages:  False 73, True 17
+> ```
+>
+> **`whitelist` never appears in the held queue.** A permitted sender is not held, full stop. And
+> graymail status does not predict a hold in either direction: 17 of 90 held messages *are* graymail,
+> and they were held because they had no permit.
+>
+> Control case, `hr.sage@themyersbriggs.co`:
+> ```
+> status=archived  detectionLevel=""  greyEmail=True  permittedSender=whitelist
+> ```
+> It is graymail, it is delivered, and it carries a permit from the `themyersbriggs.co` entry in
+> `Permitted senders`. **Its `Ignore Graymail - Company` membership is very likely redundant** — the
+> permit already explains the delivery, and no permitted sender is held regardless of graymail status.
+>
+> An earlier revision of this file drew the opposite conclusion from hr.sage ("a permit does not stop
+> a graymail hold, hr.sage still needed a graymail entry"). That was an inference from the fact that
+> both were present, never tested. It was wrong. **Do not send a held-mail problem to the graymail
+> group because `spamScore` is 0** — check `permittedSender.info` first, and if it reads `none`, the
+> missing permit is the problem.
 
 | | `Default Permitted Senders` | `Relaxed - Ignore Graymail` |
 |---|---|---|
@@ -401,9 +419,10 @@ graymail entry only turns off graymail classification. The message is still spam
   the **envelope only**, and a header address added to it will never fire. Same trap as the default
   Permitted Senders policy, with no option to flip it to `Both`.
 - `Applies To = Internal Addresses`, Policy Override unchecked, Source IP Ranges empty.
-- `greyEmail` in `message-finder/get-message-info` → `spamProcessingDetail` read **`false` on all 41**
-  messages that the console showed as graymail holds. **Do not use that field to decide whether
-  graymail is the trigger** — like the `spf` field next to it, it does not tell you which policy fired.
+- `greyEmail` in `message-finder/get-message-info` → `spamProcessingDetail` is a **working field**, not
+  a broken one: it reads `True` on 17 of 90 sampled held messages and on `hr.sage`. So when it read
+  `false` on all 41 held `themyersbriggs.co` HubSpot messages, that was the truth — those are not
+  graymail, and a graymail exemption would not have released them.
 
 ### HubSpot sending domains: `bfNN.<region>` are SHARED pools, and the lookalikes bite
 
