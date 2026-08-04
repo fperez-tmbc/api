@@ -377,6 +377,83 @@ Two things worth carrying forward:
   vendor subdomain, not a shared apex) and accepted here, but it is the reason to prefer the
   dedicated-IP subdomain when a vendor offers both.
 
+## Graymail holds — a separate lever from Permitted Senders
+
+`Administration → Gateway → Policies` → `Relaxed - Ignore Graymail`
+(Message Scan Definition `Relaxed - Ignore Graymail`, group `Ignore Graymail - Company`).
+
+**A Permitted Senders permit does not stop a graymail hold.** Proof in-tenant: `hr.sage@themyersbriggs.co`
+sends with envelope `themyersbriggs.co`, which the `Permitted senders` group already covers under the
+envelope-only default policy, and it *still* had to be added to `Ignore Graymail - Company`. When a
+sender is held with `spamScore: 0` and everything in `spamProcessingDetail` reading `allow: true`,
+reach for the graymail group, not a permit.
+
+The graymail lever is also the **safer** one: a permit grants a full spam-scanning bypass, whereas a
+graymail entry only turns off graymail classification. The message is still spam-scanned.
+
+| | `Default Permitted Senders` | `Relaxed - Ignore Graymail` |
+|---|---|---|
+| Group size | ~400 entries | 4 entries |
+| Effect of a match | bypass spam scanning | scan with graymail detection off |
+| Effect of a false match | spam reaches the inbox | graymail reaches the inbox, still spam-scanned |
+
+- **`Addresses Based On` is `The Return Address` and the field is NOT editable.** So this group matches
+  the **envelope only**, and a header address added to it will never fire. Same trap as the default
+  Permitted Senders policy, with no option to flip it to `Both`.
+- `Applies To = Internal Addresses`, Policy Override unchecked, Source IP Ranges empty.
+- `greyEmail` in `message-finder/get-message-info` → `spamProcessingDetail` read **`false` on all 41**
+  messages that the console showed as graymail holds. **Do not use that field to decide whether
+  graymail is the trigger** — like the `spf` field next to it, it does not tell you which policy fired.
+
+### HubSpot sending domains: `bfNN.<region>` are SHARED pools, and the lookalikes bite
+
+TMBC marketing goes out through HubSpot portal `243772180` and re-enters inbound. The envelope is
+HubSpot's, the header is ours, so only the envelope side can be matched here:
+
+```
+header    peoplefirst@themyersbriggs.co
+envelope  1axb4nl...@bf10.na2.hubspotemail.net
+```
+
+Measured 2026-08-04 against the held queue. **The `.na2.` segment is the region, not a customer
+marker** — sibling pools carry no TMBC mail at all:
+
+```
+held  envelope domain                      TMBC  other
+  33  bf10.na2.hubspotemail.net              30      3    <- ours
+  11  transactional.na2.hubspotemail.net     11      0    <- ours, 130/130 over 12mo
+  16  bf05.na2.hubspotemail.net               0     16
+  12  bf07.na2.hubspotemail.net               0     12
+  10  bf01.na2.hubspotemail.net               0     10
+  20  bf10x.hubspotemail.net                  0     20    <- LOOKALIKE, not ours
+```
+
+`bf10x.hubspotemail.net` is one character from `bf10.na2.hubspotemail.net` and shares none of our mail.
+
+**Why permitting a shared HubSpot pool is acceptable here (and permitting `amazonses.com` is not):**
+HubSpot enforces DNS-based domain verification before a customer may put their own domain in the
+header From. Per HubSpot: *"you cannot send emails with your domain in the From address
+(e.g. user@company.com) until you connect that domain to HubSpot by setting up DKIM."* Unverified
+senders get their From rewritten to a HubSpot-owned domain. Confirmed on all three third-party
+senders observed on `bf10.na2`:
+
+```
+mail.theswensongroup.com   dkim=pass d=mail.theswensongroup.com s=hs1-21634638   dmarc=pass p=quarantine
+clarus.com                 dkim=pass d=clarus.com               s=hs2            dmarc=pass p=reject
+preferredcfo.com           dkim=pass d=preferredcfo.com          s=hs2-3018756    dmarc=pass p=quarantine
+```
+
+Portal-numbered selectors (`hs1-21634638`, `hs2-3018756`, ours is `hs2-243772180`) are the tell that
+DNS control was proven. `amazonses.com` has no equivalent gate, which is why that one stays banned.
+
+So the co-tenants on a HubSpot pool are domain-verified senders, not anonymous ones. Frank accepted
+the residual on that basis, 2026-08-04.
+
+**Durable fix, not yet done:** HubSpot supports a custom return-path so the envelope lands on our own
+domain. Configured for portal 243772180, the envelope becomes `<x>.themyersbriggs.co` and the
+shared-pool exposure disappears. That is exactly what `em3639`/`em7919.themyersbriggs.net` already are
+for SendGrid, which is why those two sit in this group cleanly.
+
 ## Reading envelope vs header for a message
 
 `message-finder/search` returns `fromEnv` and `fromHdr` per message:
