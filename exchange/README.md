@@ -28,18 +28,28 @@
 > loopback workarounds) remain correct — substitute a live account in the examples.
 > Full detail: `api/ssh/README.md`.
 
-## macOS gotcha: EXO PowerShell module is broken — call the REST adminapi instead
+## macOS gotcha: pin `ExchangeOnlineManagement` to 3.9.2
 
-On macOS, the `ExchangeOnlineManagement` module (3.10) throws on every REST cmdlet:
+`ExchangeOnlineManagement` **3.10.0** throws on every REST cmdlet:
 `Method invocation failed because [System.Net.Http.HttpResponseMessage] does not
-contain a method named 'GetResponseHeader'`. Confirmed on **both** PowerShell 7.6
-and 7.4 — it's a macOS bug in the module's REST layer, not a pwsh-version issue.
+contain a method named 'GetResponseHeader'`. Auth succeeds, then every cmdlet fails.
+
+**3.9.2 works fully.** Verified 2026-08-03 on pwsh 7.6.0 with app-only cert auth:
+`Connect-ExchangeOnline` followed by `Get-Mailbox` returned live data. So this is a
+**module-version** bug, not the blanket macOS platform bug previously recorded here.
+Both versions are installed and **3.10.0 loads by default**, so always pin:
+
+```powershell
+Import-Module ExchangeOnlineManagement -RequiredVersion 3.9.2 -Force
+```
+
 (The Windows VM `vmnofrankp71` connects but its network path returns `417
 Expectation Failed`, intermittently breaking the module there too.)
 
-**Workaround — hit the EXO admin REST API directly from Python** (no module, no
-bug; works from macOS with clean egress). Get an app-only token with the
-`claude-m365` cert via MSAL, then POST `InvokeCommand`:
+**Alternative — hit the EXO admin REST API directly from Python.** Still useful when
+you want clean JSON instead of the module's CLIXML, but no longer required to work
+around the module. Get an app-only token with the `claude-m365` cert via MSAL, then
+POST `InvokeCommand`:
 
 ```python
 import json, msal, requests
@@ -81,14 +91,15 @@ Basic auth and user-delegated auth are not viable on macOS for non-interactive u
 | API permission | `Office 365 Exchange Online → Exchange.ManageAsApp` (application) |
 | Exchange role group | `Recipient Management` (on-prem registration via `New-ServicePrincipal`) |
 | Entra role | `Exchange Administrator` |
-| Cert expiry | 2027-05-13 |
+| Cert expiry | **2028-05-13** (cert `notAfter`; `config.json` still says 2027-05-13 and is wrong) |
+| SCC / Purview roles | **none** — see IPPS note below |
 
 Credentials: `~/.tokens/claude-m365/` — `cert.pfx`, `cert.pem`, `key.pem`, `config.json`
 
 ### Connection Snippet
 
 ```powershell
-Import-Module ExchangeOnlineManagement
+Import-Module ExchangeOnlineManagement -RequiredVersion 3.9.2 -Force
 Connect-ExchangeOnline `
     -AppId '69de0375-242d-4b8a-94df-4e095ab81cea' `
     -CertificateFilePath '/Users/fperez2nd/GitHub/.tokens/claude-m365/cert.pfx' `
@@ -96,7 +107,25 @@ Connect-ExchangeOnline `
     -ShowBanner:$false
 ```
 
-No device code, no browser, no interactive prompt.
+No device code, no browser, no interactive prompt. **This is the default path — do not
+reach for `-Device`.** See the device code flow note under Gotchas.
+
+### Security & Compliance (`Connect-IPPSSession`) — partial app-only coverage
+
+Same cert works, but RBAC limits what loads. Verified 2026-08-03:
+
+| Cmdlet | App-only |
+|---|---|
+| `Get-QuarantineMessage` | ✅ available (so `/quarantine-review` works app-only) |
+| `Get-Label` | ❌ not available |
+| `Get-DlpCompliancePolicy` | ❌ not available |
+| `Get-ComplianceSearch` | ❌ not available |
+
+The SP holds the `Exchange Administrator` Entra role but **no Purview/SCC role**, so
+compliance cmdlets never load. To fix, either assign the `Compliance Administrator`
+Entra role to the SP (broad, unscopable) or add the SP to a custom SCC role group via
+`New-ServicePrincipal` + `Add-RoleGroupMember` (granular, Microsoft's recommended
+option). Either requires a privileged interactive session; the SP cannot grant itself.
 
 ### Setup Steps (one-time, already completed)
 
@@ -114,7 +143,8 @@ No device code, no browser, no interactive prompt.
 
 ### Gotchas
 
-- `Connect-ExchangeOnline` without `-Device` fails on macOS with a `PlatformNotSupportedException` — browser auth is not supported. Always use the app/cert approach for unattended access.
+- **Device code flow is BLOCKED tenant-wide as of 2026-08-03.** Conditional Access policy `Block device code flow` (All users, All apps) blocks it, with only `2bcampbell`, `2fperez`, `2mhumora`, `2rceglarz` excluded. `-Device` therefore fails for every normal account and must not be the go-to. Use app-only cert auth above.
+- `Connect-ExchangeOnline` without `-Device` fails on macOS with a `PlatformNotSupportedException` — browser auth is not supported. Combined with the device code block, **app-only cert auth is the only viable path on macOS.**
 - `Get-MailboxRestoreRequest` in Exchange Online does not support `-Mailbox` parameter — filter with `Where-Object { $_.TargetAlias -in $aliases }` instead.
 - `-AllowLegacyDNMMismatch` is an on-prem-only parameter; omit it for Exchange Online cmdlets.
 - `-SourceIsArchive` is a switch parameter — do not pass `$true`, just use the flag.
