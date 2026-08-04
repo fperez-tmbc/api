@@ -442,6 +442,109 @@ Anti-Virus `Mismatch` after upgrade is normal (content version difference) and d
 - Always poll job status: `type=op`, `cmd=<show><jobs><id>JOBID</id></jobs></show>`
 - Warnings (not errors) in Detail lines do not prevent OK result
 - HA sync adds ~30s to commit time; Panorama connectivity check adds another ~15s
+- **Check `<check><pending-changes></pending-changes></check>` before committing.** A commit flushes
+  the whole candidate config, so any half-finished work another admin left uncommitted ships with
+  your change. Verify `no` first.
+- PA-220 commits run **5–7 minutes** and sit at `progress=0%` for the first 2–4 of them. That is
+  normal, not a hang. Poll with a >2 min tool timeout or the polling loop dies before the job does.
+
+### HA pairs serialize commits — you cannot do both peers at once
+
+Committing on one peer enqueues an **HA-Sync job on the other**, and while that runs the second peer
+rejects config writes with:
+
+```
+<response status="error" code="13"><msg><line>A commit is pending. Please try again later.</line></msg></response>
+```
+
+On a PA-220 pair that HA-Sync took **~4.5 minutes** (observed AU, 2026-08-04). The sequence that
+works:
+
+1. Edit + commit peer A; poll to FIN.
+2. Poll the **HA-Sync job that appears on peer B** to FIN (`show jobs all`, type `HA-Sync`).
+3. Only then edit + commit peer B.
+
+Budget ~15 minutes for a two-peer config change on PA-220s. Code 13 here is a retry-later, not a
+permissions or syntax problem — don't go hunting for a template override.
+
+### Verifying a committed change
+
+`<show><config><running><xpath>…</xpath></running></config></show>` returns
+`<msg><line>No such node</line></msg>` — that op does not accept an xpath filter this way, and the
+error is about the command, **not** a missing setting. Don't read it as the change having vanished.
+
+Verify instead with `type=config action=get` on the xpath plus a pending-changes check. Before a
+commit the returned nodes carry `admin="…" dirtyId="1" time="…"` attributes; after a successful
+commit those attributes are gone and `pending-changes` is `no`. Absent attributes + `no` = committed.
+
+> Watch for those attributes when grepping. `grep -oE "<update-schedule>"` silently matches nothing
+> once the tag becomes `<update-schedule admin="…" dirtyId="1">`. Match `<update-schedule[^>]*>`.
+
+## Dynamic Update Schedules
+
+xpath: `/config/devices/entry[@name='localhost.localdomain']/deviceconfig/system/update-schedule`
+
+Child nodes exist only for what's actually scheduled — typically `threats` and `anti-virus`. Nodes
+for `wildfire` / `url-database` are absent when those aren't licensed.
+
+```
+type=config  action=get  xpath=<above>
+```
+
+Each node holds `<recurring><daily><at>HH:MM</at><action>download-and-install</action></daily></recurring>`.
+
+### `update-schedule` is device-local — HA config sync does NOT carry it
+
+Confirmed on the AU pair 2026-08-04: after a full HA-Sync completed from the peer that had been
+changed, the other peer **still had its original schedule**. This is also why HA peers routinely show
+different update times (AU ran 23:00/23:30 on one and 00:00/00:30 on the other for years).
+
+Consequence: **you must set this explicitly on both peers.** Changing one and trusting HA sync leaves
+the other still updating, silently.
+
+### Disabling the schedules
+
+Use the GUI-equivalent "None" recurrence rather than deleting the nodes — it keeps the structure, so
+re-enabling is one `edit` per node instead of rebuilding.
+
+```bash
+XB="/config/devices/entry[@name='localhost.localdomain']/deviceconfig/system/update-schedule"
+for node in threats anti-virus; do
+  curl -sk "https://<host>/api/" \
+    --data-urlencode "type=config" --data-urlencode "action=edit" \
+    --data-urlencode "key=$TOKEN" \
+    --data-urlencode "xpath=$XB/$node/recurring" \
+    --data-urlencode "element=<recurring><none/></recurring>"
+done
+# then commit, and see the HA serialization note under Commit before doing the second peer
+```
+
+Use `action=edit` (replaces the node), not `action=set` — `recurring` is a choice node and a merge
+can leave `daily` sitting alongside `none`.
+
+Re-enable by editing the same xpath back to the `<daily>` form.
+
+**Take a restore point first:** `<save><config><to>pre-change-YYYYMMDD.xml</to></config></save>` on
+each peer (candidate == running when pending-changes is `no`, so this is a clean snapshot). Restore
+with `<load><config><from>…</from></config></load>` + commit. Also record the original `at` times
+per peer — they differ between peers, so a snapshot alone doesn't tell you which value belongs where.
+
+### When to disable
+
+Once a site's Threat Prevention / support licenses lapse, the schedules keep firing and failing
+nightly, adding noise to the job log. Disabling is cleanup, not a functional change — it doesn't
+touch traffic.
+
+**Done on AU 2026-08-04** (both peers, licenses lapsed that day; commit jobs #310 / #308). Snapshot
+`pre-disable-updates-20260804.xml` on each. Note that AU's content installs had been failing nightly
+anyway (PAN-300055), while AV installs were still succeeding right up to the change.
+
+AU pre-change values, for a targeted re-enable (both were `download-and-install`):
+
+| Device | threats | anti-virus |
+|--------|---------|------------|
+| AUPAN01 | daily 23:00 | daily 23:30 |
+| AUPAN02 | daily 00:00 | daily 00:30 |
 
 ## Disk Cleanup (PA-220 / PAN-OS 10.2.x)
 
