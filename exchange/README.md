@@ -92,7 +92,7 @@ Basic auth and user-delegated auth are not viable on macOS for non-interactive u
 | Exchange role group | `Recipient Management` (on-prem registration via `New-ServicePrincipal`) |
 | Entra role | `Exchange Administrator` |
 | Cert expiry | **2028-05-13** (cert `notAfter`; `config.json` still says 2027-05-13 and is wrong) |
-| SCC / Purview roles | **none** — see IPPS note below |
+| Entra role (Purview) | `Compliance Administrator` (assigned 2026-08-03) |
 
 Credentials: `~/.tokens/claude-m365/` — `cert.pfx`, `cert.pem`, `key.pem`, `config.json`
 
@@ -110,22 +110,42 @@ Connect-ExchangeOnline `
 No device code, no browser, no interactive prompt. **This is the default path — do not
 reach for `-Device`.** See the device code flow note under Gotchas.
 
-### Security & Compliance (`Connect-IPPSSession`) — partial app-only coverage
+### Security & Compliance (`Connect-IPPSSession`) — full app-only coverage
 
-Same cert works, but RBAC limits what loads. Verified 2026-08-03:
+Same cert, same pinned module. Verified working 2026-08-03:
 
-| Cmdlet | App-only |
+```powershell
+Import-Module ExchangeOnlineManagement -RequiredVersion 3.9.2 -Force
+Connect-IPPSSession `
+    -AppId '69de0375-242d-4b8a-94df-4e095ab81cea' `
+    -CertificateFilePath '/Users/fperez2nd/GitHub/.tokens/claude-m365/cert.pfx' `
+    -Organization 'themyersbriggs.com'
+```
+
+| Cmdlet | Result |
 |---|---|
-| `Get-QuarantineMessage` | ✅ available (so `/quarantine-review` works app-only) |
-| `Get-Label` | ❌ not available |
-| `Get-DlpCompliancePolicy` | ❌ not available |
-| `Get-ComplianceSearch` | ❌ not available |
+| `Get-QuarantineMessage` | ✅ works (so `/quarantine-review` runs app-only) |
+| `Get-Label` | ✅ works (returned 0 — tenant has no sensitivity labels configured) |
+| `Get-DlpCompliancePolicy` | ✅ works (3 policies) |
+| `Get-ComplianceSearch` | ✅ works (50 searches) |
+| `Get-RetentionCompliancePolicy` | ✅ loads |
 
-The SP holds the `Exchange Administrator` Entra role but **no Purview/SCC role**, so
-compliance cmdlets never load. To fix, either assign the `Compliance Administrator`
-Entra role to the SP (broad, unscopable) or add the SP to a custom SCC role group via
-`New-ServicePrincipal` + `Add-RoleGroupMember` (granular, Microsoft's recommended
-option). Either requires a privileged interactive session; the SP cannot grant itself.
+**Before 2026-08-03 none of the compliance cmdlets loaded**, because the SP held only
+`Exchange Administrator`. Granting the `Compliance Administrator` Entra role fixed it and
+took effect immediately (no propagation wait). Assigned with `az rest` as `2fperez`, not
+with the SP's own token, so the SP never self-escalates:
+
+```bash
+az rest --method POST \
+  --url "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments" \
+  --headers "Content-Type=application/json" \
+  --body '{"roleDefinitionId":"17315797-102d-40b4-93e0-432062caca18","principalId":"176b0e4e-4237-4381-bc4e-cbad24852ab6","directoryScopeId":"/"}'
+```
+
+⚠️ `Compliance Administrator` is broad and cannot be scoped. It includes eDiscovery and
+content search, so this SP can search and export the content of any mailbox in the tenant.
+Chosen deliberately over a custom SCC role group for simplicity. Revoke by deleting the
+role assignment if that tradeoff ever stops being acceptable.
 
 ### Setup Steps (one-time, already completed)
 
@@ -143,7 +163,7 @@ option). Either requires a privileged interactive session; the SP cannot grant i
 
 ### Gotchas
 
-- **Device code flow is BLOCKED tenant-wide as of 2026-08-03.** Conditional Access policy `Block device code flow` (All users, All apps) blocks it, with only `2bcampbell`, `2fperez`, `2mhumora`, `2rceglarz` excluded. `-Device` therefore fails for every normal account and must not be the go-to. Use app-only cert auth above.
+- **Device code flow is BLOCKED tenant-wide as of 2026-08-03.** Conditional Access policy `Block device code flow` (All users, All apps) blocks it, with only **`2fperez` and `2mhumora`** excluded. `-Device` therefore fails for every other account and must not be the go-to. Use app-only cert auth above. Note the CA policy PATCH returns `204` before the change is readable — poll until the read-back converges rather than trusting the status code.
 - `Connect-ExchangeOnline` without `-Device` fails on macOS with a `PlatformNotSupportedException` — browser auth is not supported. Combined with the device code block, **app-only cert auth is the only viable path on macOS.**
 - `Get-MailboxRestoreRequest` in Exchange Online does not support `-Mailbox` parameter — filter with `Where-Object { $_.TargetAlias -in $aliases }` instead.
 - `-AllowLegacyDNMMismatch` is an on-prem-only parameter; omit it for Exchange Online cmdlets.
