@@ -180,6 +180,28 @@ body = {"data": [{"searchReason": "permit audit",
 # -> data[0].trackedEmails[].fromEnv.emailAddress / .fromHdr.emailAddress
 ```
 
+> ### ⚠ `advancedTrackAndTraceOptions.from` is EXACT-domain. It does not match subdomains.
+>
+> Searching `from: "hubspot.com"` returns **only** mail whose address is at the bare apex. It will
+> not surface `noreply@notifications.hubspot.com`. Verified 2026-08-04:
+>
+> ```
+> from: hubspot.com                                111 msgs
+> from: notifications.hubspot.com                2,444 msgs   <- invisible to the query above
+> from: notifications.transactional.hubspot.com     16 msgs
+> ```
+>
+> This produced a wrong conclusion the same day: two HubSpot permit policies were assessed as
+> "matching nothing" when one of them carries the largest HubSpot flow in the tenant by 20x.
+>
+> **Never enumerate a vendor's sending domains with this parameter.** It can only confirm a domain
+> you already named. To *discover* them, use `archive/search` with `<sent select="from">apex</sent>`
+> (which does traverse subdomains) and pull `envelopeFrom` / `from` from
+> `archive/get-message-detail` per message. That is the only reliable enumeration, and it is what
+> the vendor tables in this file are built from.
+>
+> Note `<sent>` also conflates envelope and header, so the *detail* call is what separates them.
+
 Validation rules that will bite:
 - `messageId` **or** `advancedTrackAndTraceOptions`, never both, and neither may be blank.
 - `advancedTrackAndTraceOptions` needs at least one of `from`, `to`, `subject`, `senderIP`, `url`.
