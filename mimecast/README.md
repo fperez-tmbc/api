@@ -118,8 +118,27 @@ set to envelope-only, as an anti-spoofing measure. Do not change it.** Header-fr
 spoofable, and that group holds ~435 members of which ~368 are whole domains, so flipping it to
 `Both` would let anyone forge a `From:` on any of those 368 domains and bypass spam scanning.
 
-To permit a sender on its **header** address, create a **separate, narrowly scoped policy** with
-`Addresses Based On = Both` and `Applies From = Individual Email Address`. Leave the default alone.
+To permit a sender on its **header** address, use a **second group** with its own `Both` policy.
+Leave the default alone.
+
+| | Group | Matching | Contents |
+|---|---|---|---|
+| `Default Permitted Senders Policy` | `Permitted senders` | envelope only | ~400 entries, mostly bare domains |
+| header-match policy | a second, small group | `Both` | curated, individually vetted |
+
+`Both` was safe to lose on the default because of *scale*, not because header matching is wrong:
+351 bare domains × `Both` lets anyone forge a `From:` on any of them. On a small curated group the
+same setting is fine. Sizing is the control, so keep that group short and justify every entry in
+`notes`.
+
+**Check DMARC before adding a domain to the header group.** A vendor at `p=reject` cannot have its
+header From forged past authentication, which is what makes the entry safe. Verified 2026-08-04 —
+all ten TMBC permitted-sender vendors publish `p=reject`: hubspot, salesforce, expensify, adobesign,
+adp, docusign, myob, atlassian (.com and .net), fidelity. A vendor at `p=none` belongs in the group
+as an **individual address**, not a whole domain.
+
+Scoping it as a group rather than per-sender policies is what stops policy sprawl: adding a vendor
+becomes a group edit, and the Gateway Policies list stays readable.
 
 ### Reading matching mode off the policy LIST — the inference is ONE-WAY
 
@@ -211,13 +230,45 @@ wrongly-configured policies on 2026-07-30.
 `@*.domain.com` wildcards work in an **individual policy**. Profile groups are **exact match only** —
 a root domain in a group does **not** cover its subdomains, and wildcards cannot be added to a group.
 
-So a vendor using subdomains needs both:
-- an individual policy `@*.vendor.com` for the subdomains, and
-- an exact group entry `vendor.com` for the apex (the wildcard is not known to cover the apex; TMBC
-  mirrors this pattern for Salesforce, Expensify, Atlassian, ADP and Fidelity).
+> ### ⚠ `@*.vendor.com` appears to match ONE label only. Prefer a group entry.
+>
+> Measured 2026-08-04 against the 7,500-message held queue. **Every held envelope belonging to a
+> vendor that has a wildcard policy was a multi-label subdomain:**
+>
+> ```
+> 8x  bounces@mail.na4.adobesign.com          <- policy [ @*.adobesign.com ] exists, held daily
+> 7x  <verp>.<verp>.<region>.bnc.salesforce.com  <- policy @*.salesforce.com exists, held
+> ```
+>
+> `mail.na4.adobesign.com` was held **8 days running** on an identical daily notification while
+> `[ @*.adobesign.com]` was active and enabled. The consistent reading is that `*` substitutes a
+> single label: `@*.adobesign.com` covers `na4.adobesign.com` but not `mail.na4.adobesign.com`.
+>
+> **Group entries, by contrast, have a perfect record: 353 permitted domains against 7,500 held
+> messages produced zero collisions.** Exact-match works; the wildcard is the unreliable half.
+>
+> Not proven from the console (Permitted Senders config is not API-readable), and single-label
+> subdomains are too low-volume to test by absence of holds. But the remediation is the same either
+> way, so it has not been worth chasing further: **enumerate the subdomains as group entries.**
+
+**Default to group entries, not a wildcard policy.** 159 of the 351 bare-domain entries in
+`Permitted senders` are already subdomains (`bounce.zoom.com`, `bounce.1password.com`,
+`bounces.rapid7.com`, `alerts.bounces.google.com`, …). That is the house pattern and it is the one
+that demonstrably works.
+
+| Envelope situation | Where it goes | New policies |
+|---|---|---|
+| In vendor's own tree, subdomains enumerable | `Permitted senders` group | **0** |
+| Per-message VERP subdomains (unenumerable), in-tree or not | header-match group + one shared policy | **0** after setup |
+| On shared third-party infra (`amazonses.com`, `mandrillapp.com`, `sendgrid.net`) | header-match group + one shared policy | **0** after setup |
+| Genuinely unpredictable *and* header unusable | `@*.vendor.com` policy, knowing the one-label caveat | 1 per vendor |
+
+Row 4 should be rare. Reach for it last, not first.
 
 **Do not infer subdomain coverage from mail being delivered.** Delivery is the default; a permit only
 bypasses spam scanning. Confusing the two produced a wrong conclusion on 2026-07-29.
+Equally, **do not infer that a permit fired because a message was not held** — only ~4% of inbound
+trips spam signature, so a quiet subdomain proves nothing. Judge coverage from the *held* queue.
 `message-finder/get-message-info` → `policyInfo` reports the policy *type* and *action*
 (`Permitted Senders` / `Permit sender`) but **not** the policy narrative, so it cannot tell you which
 of two candidate policies matched.
@@ -267,6 +318,42 @@ Working config:
 Residual risk, accepted: `no-reply@sns.amazonaws.com` is AWS-shared, so any AWS account's SNS topics
 use it. SNS requires subscription confirmation before content flows, so practical exposure is limited
 to unsolicited confirmation mail.
+
+## Permitting Zoom — the contrasting case (group entry, no policy)
+
+Resolved 2026-08-04. Same symptom as AWS SNS (graymail held), opposite fix, because Zoom keeps its
+envelope **in its own tree** while AWS does not.
+
+| Header From | Envelope domain | 30d | Held |
+|---|---|---|---|
+| `no-reply@zoom.us` | `bounce-sg.zoom.us` | 131 | 5 |
+| `customer-success-advisor@zoom.us` | `gshemail.zoom.us` | 15 | **6** |
+| `noreply-marketplace@zoom.us` | `bounce-sg.zoom.us` | 3 | 0 |
+| `teamzoom@zoom.com` | `bounce.zoom.com` | 4 | 0 |
+
+`zoom.us` was already a group entry, but groups are exact-match and the default policy is
+envelope-only, so it never fired — the envelope is always on a subdomain. `bounce.zoom.com` is the
+control: it *is* an exact group entry, and it has held nothing.
+
+**Fix: two group entries, `bounce-sg.zoom.us` and `gshemail.zoom.us`. No policy.** Leave `zoom.us`,
+`zoom.com`, `bounce.zoom.com` alone.
+
+Two things worth carrying forward:
+
+- **`no-reply@zoom.us` is actively forged at the envelope.** 61 messages in 3 weeks, all rejected on
+  `IP Found in RBL`, all aimed at opp.com / opp.co.uk (`108.165.185.37` ×44, `183.237.228.212` ×17).
+  The apex group entry permits that envelope; RBL is what is catching them, not the permit layer.
+  Subdomain entries do not widen this, but do not add anything that loosens the apex.
+- **The two Zoom subdomains are not equally tight**, which is the same distinction as the SendGrid
+  `em*` case:
+  ```
+  gshemail.zoom.us    v=spf1 ip4:168.245.42.152 -all      one dedicated IP, hard fail
+  bounce-sg.zoom.us   v=spf1 include:sendgrid.net ~all    SendGrid's shared /17, softfail
+  ```
+  Permitting `bounce-sg.zoom.us` means any SendGrid tenant who forges that MAIL FROM gets a
+  spam-scanning bypass with an arbitrary header From. Narrower than the `amazonses.com` trap (one
+  vendor subdomain, not a shared apex) and accepted here, but it is the reason to prefer the
+  dedicated-IP subdomain when a vendor offers both.
 
 ## Reading envelope vs header for a message
 
