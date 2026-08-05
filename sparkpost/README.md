@@ -38,7 +38,7 @@ https://api.eu.sparkpost.com/api/v1     # EU — different account namespace, no
 
 ---
 
-## ⚠️ READ THIS FIRST: a blanket 401 means source IP, not a bad key
+## ⚠️ READ THIS FIRST: source IP is everything here
 
 **Every API key on this account is IP-restricted.** Misreading this has already cost a
 misdiagnosis ("key revoked") and, separately, a QA email outage.
@@ -59,36 +59,49 @@ report "the key is dead" or "the IP was removed" from a 401 alone.
 
 Triage order:
 
-1. `curl -s https://api.ipify.org` — has your egress changed? IP drift is the common cause.
+1. **Is GlobalProtect connected, and is the macOS network extension approved?** SparkPost egresses
+   the office IP via GP `include-domains` (see below). No GP, or an unapproved extension, means the
+   call leaves from your local ISP and 401s.
 2. Has `~/GitHub/.tokens/sparkpost` been modified? (`stat -f '%Sm'`)
-3. If both are unchanged and it worked recently, the change was made **in the console** — check
+3. If both are fine and it worked recently, the change was made **in the console** — check
    Configuration → API Keys for both the key's existence and its Allowed IPs.
 
 The useful positive signal is the **403 on `/api-keys`**: if you get that, the key is good and your
-IP is allowlisted, because auth succeeded and only the endpoint was refused.
+source IP is accepted, because auth succeeded and only the endpoint was refused.
 
 `TMBC_Admin` allowlist:
 
 | IP | What it is | Status |
 |---|---|---|
 | `20.95.36.96` | office egress for **GlobalProtect-tunnelled** traffic | standing |
-| `73.170.17.34` | Frank's home IP, residential | **added ~19:00, removed by ~20:49 on 2026-08-05** |
 
-**API access from a workstation is granted on request, not standing.** On 2026-08-05 Frank
-allowlisted the current egress for a task (all endpoints 200) and withdrew it afterwards (all
-endpoints 401, with egress and key file both unchanged). So expect no access by default: ask for the
-current egress IP to be allowlisted for the duration of the work, and expect it to lapse.
+**SOLVED 2026-08-05: `api.sparkpost.com` is in GP `include-domains` on the `EMPLOYEES` gateway
+config, so API calls now egress `20.95.36.96` over the tunnel.** No per-workstation IP allowlisting
+is needed any more, and it survives a residential IP change. Frank's home IP was allowlisted
+temporarily during diagnosis and then removed — do not re-add it.
 
-**GlobalProtect is split-tunnel and `api.sparkpost.com` is NOT in the tunnel routes**, so calls
-from a Mac egress the local ISP even with GP connected. Connecting GP does not fix a 401. Adding
-`api.sparkpost.com` to GP `include-domains` would route it via `20.95.36.96` and remove the
-per-IP request cycle entirely — see `project-gp-domain-split-tunnel`, still not done for SparkPost.
+Requirement: the **GlobalProtect macOS network extension must be user-approved**
+(System Settings → General → Login Items & Extensions → Network Extensions). Domain-based split
+tunnel is implemented via that extension; until it is approved the domain entry is silently inert.
+The portal `split-tunnel-option` does **not** need changing — it is `network-traffic` here and the
+domain entry works fine. PAN documents the DNS option as supplementary, not required.
 
-**Always check egress before blaming the key:**
+### Do not use `route get` to test this
+
+Domain-based split tunnel installs **no per-IP host routes**. It captures matched flows in the
+extension and there is a `default` route on the GP `utun`. So `route -n get <resolved-ip>` reports
+`en0` even while the traffic is tunnelling correctly. This misled the 2026-08-05 diagnosis badly.
+
+**Test with the API response instead** — it is the only reliable signal:
 
 ```bash
-curl -s https://api.ipify.org
+KEY=$(cat ~/GitHub/.tokens/sparkpost)
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: $KEY" \
+  https://api.sparkpost.com/api/v1/api-keys     # 403 = auth OK (key + IP good). 401 = not.
 ```
+
+Also note `api.ipify.org` is **not** a valid egress probe for this: it is not in `include-domains`,
+so it reports the direct path while SparkPost tunnels.
 
 The allowlist is editable **only** in the console (Configuration → API Keys → Allowed IPs), and
 SparkPost keeps **no per-source-IP auth log** in either the API or the GUI — so "is the old IP
@@ -235,9 +248,9 @@ IPs, which is why only QA broke on 2026-07-17 when the t2→t3 change moved them
 KEY=$(cat ~/GitHub/.tokens/sparkpost); H="Authorization: $KEY"
 B=https://api.sparkpost.com/api/v1
 
-# sanity check + confirm your egress is allowlisted
-curl -s https://api.ipify.org; echo
-curl -s -o /dev/null -w '%{http_code}\n' -H "$H" $B/account   # 401 => IP, not key
+# sanity check: 403 here means key + source IP are both good (see triage above)
+curl -s -o /dev/null -w '%{http_code}\n' -H "$H" $B/api-keys
+curl -s -o /dev/null -w '%{http_code}\n' -H "$H" $B/account
 
 # current month usage
 curl -s -H "$H" $B/usage | python3 -m json.tool
