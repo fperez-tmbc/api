@@ -240,13 +240,53 @@ Pinning that by CIDR would mean tunnelling most of AWS us-west-2. A domain entry
 `204.14.232.0/21`) — only `login.salesforce.com` still lands in `136.146.0.0/15`. Treat every
 IP-pinned SaaS entry as suspect until re-resolved.
 
-#### Deployed state — AVS `EMPLOYEES` (2026-08-05, commit jobs 343 then 346)
+#### ⚠️ Domain entries did NOT tunnel — verify before trusting them
+
+Added on AVS 2026-08-05 and **they did not work**. On the only client running the new config (macOS
+26.6, GP 6.3.3-1105, reconnected immediately after the commit), the tunnel carried internal DNS and
+Kerberos only — zero traffic to `*.adp.com` hosts. Client-side cause unresolved; suspect the macOS
+network-extension path. **Do not remove a working `access-route` CIDR on the assumption its domain
+equivalent covers it.** Prove the domain rule first, on a client that has actually reconnected.
+
+#### The verification trap: clients cache the pushed config
+
+**GP clients keep their split-tunnel config until they reconnect.** After the CIDRs were removed,
+other users' Salesforce/ADP traffic kept tunneling — which looked like proof the domain rules worked.
+It was stale client config. Only sessions whose `login-time` is *after* the commit are valid test
+subjects:
+
+```bash
+type=op cmd=<show><global-protect-gateway><current-user/></global-protect-gateway></show>
+# read login-time per session; ignore anyone who hasn't reconnected since the commit
+```
+
+Confirm tunneling from the firewall side, not the app's behaviour — a page that loads may simply be
+egressing locally. Look for the flow in the traffic log with `natsrc` = the GP egress
+(`20.95.36.96` here):
+
+```
+type=log log-type=traffic query=(addr.src in 10.255.200.0/24) and (addr.dst in 170.146.0.0/16)
+```
+
+#### Deployed state — AVS `EMPLOYEES` (2026-08-05, commit jobs 343, 346, 349)
 
 Job 343 added six `include-domains` entries: `*.salesforce.com`, `salesforce.com`, `*.force.com`,
-`force.com`, `*.adp.com`, `adp.com`. Job 346 then removed 19 `access-route` CIDRs (10 unidentified
-Akamai, 4 Salesforce, 4 ADP, 1 Fifth Third), taking the list from 30 IP entries to **11**. Both
-HA-synced to AVSPAN02 and verified identical. **WH and FR still carry the old IP-pinned lists**;
-AU skipped permanently (site closing).
+`force.com`, `*.adp.com`, `adp.com`. Job 346 removed 19 `access-route` CIDRs. Job 349 then **restored
+the 4 Salesforce CIDRs and replaced the 4 narrow ADP slices with `170.146.0.0/16`** once testing
+showed the domain rules weren't tunneling. Live state: **16 access-route entries + 6 domains**. The 10
+unidentified Akamai entries and the Fifth Third `/32` stay removed. All HA-synced to AVSPAN02 and
+verified identical. **WH and FR still carry the old IP-pinned lists**; AU skipped (site closing).
+
+**ADP needs the whole `/16`, not slices.** `170.146.0.0/16` is entirely ADP's own netblock
+(`ADP-ESNET`). ADP's GSLB rotates hosts across it — `time.adp.com` at `.92.217`, `online` at `.93.x`,
+`clock` at `.96.x`, `ipay` at `.97.x`, `workforcenow` at `.102.193`. The old four ranges started at
+`.96` and so **never covered `time.adp.com`**, which is the one host the split tunnel existed for:
+ADP Time &amp; Attendance enforces an IP allowlist and otherwise returns *"Access denied… from a
+location that is not authorized by your company."*
+
+**PAN logs are EDT; Frank and his Mac are PDT.** Add 3 hours to a local screenshot/file timestamp
+before comparing it to a firewall job or log time. Getting this backwards inverts before/after
+conclusions. `<show><clock/></show>` returned empty on AVSPAN01, so use a log `receive_time` instead.
 
 Removing an IP list is one `action=edit` on `$XP/access-route` with an `<access-route>` element
 containing every member you want to survive — `edit` replaces the node, so include the keepers.
