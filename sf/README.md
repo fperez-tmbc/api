@@ -114,10 +114,68 @@ GET /services/data/v62.0/tooling/query?q=SELECT+Id,DeveloperName,MasterLabel,Aut
 ### Notes
 
 - Use the `Id` from a query result to fetch the full record via `/sobjects/{type}/{Id}`
+- `SamlSsoConfig` and `TransactionSecurityPolicy` are **not** Tooling API sObjects (`INVALID_TYPE` / "not supported"). Read them via the SOAP Metadata API instead (see below).
 - API version used: `v62.0` — bump as needed; older versions may not expose all fields
 - Standard SOQL applies: `WHERE`, `LIKE`, `ORDER BY`, `LIMIT` all work
 - `get_token.py` outputs JSON, not shell exports — parse it, don't `eval` it (see [Token exchange](#token-exchange))
 - `totalSize` in a query response reflects rows returned (respects `LIMIT`), not the full table count — use `SELECT COUNT(Id)` for a true total
+
+---
+
+## SOAP Metadata API — org settings and SSO
+
+Org-wide settings (`SecuritySettings`, `SessionSettings`) and SSO/connected-app config are not
+exposed as REST or Tooling sObjects. Use the SOAP Metadata API at
+`https://<instance_url>/services/Soap/m/62.0` with the OAuth access token as the `sessionId`.
+
+`readMetadata` envelope (SOAPAction: `readMetadata`):
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<env:Envelope xmlns:env="http://schemas.xmlsoap.org/soap/envelope/"
+ xmlns:met="http://soap.sforce.com/2006/04/metadata">
+  <env:Header><met:SessionHeader><met:sessionId>ACCESS_TOKEN</met:sessionId></met:SessionHeader></env:Header>
+  <env:Body><met:readMetadata>
+    <met:type>SecuritySettings</met:type>
+    <met:fullNames>SecuritySettings</met:fullNames>
+  </met:readMetadata></env:Body>
+</env:Envelope>
+```
+
+Swap `readMetadata` for `listMetadata` (add `<met:asOfVersion>62.0</met:asOfVersion>`) to enumerate
+`SamlSsoConfig`, `AuthProvider`, or `ConnectedApp` full names first, then read them.
+
+Useful types:
+
+| Type | Contains |
+|------|----------|
+| `SecuritySettings` | `networkAccess.ipRanges` (Trusted IP Ranges), `passwordPolicies`, full `sessionSettings` |
+| `SamlSsoConfig` | IdP issuer, `loginUrl`, validation cert |
+| `ConnectedApp` | `ipRelaxation` (`ENFORCE` / `BYPASS`), `ipRanges` |
+
+### IP restriction surfaces — where to look
+
+Four separate places, only one of which actually blocks a login:
+
+1. **Profile Login IP Ranges** — the only hard block. Read per profile:
+   `GET /services/data/v62.0/tooling/sobjects/Profile/{Id}` → `Metadata.loginIpRanges`.
+   Querying `Metadata` in a Tooling SOQL `SELECT` returns one record max, so list profile Ids
+   first (`SELECT Id, Name FROM Profile`) then fetch each record individually.
+2. **Network Access → Trusted IP Ranges** (`SecuritySettings.networkAccess`) — never blocks.
+   Only exempts from identity verification challenges.
+3. **Session settings** — `enforceIpRangesEveryRequest` (re-check IP mid-session) and
+   `lockSessionsToIp` (kill session on IP change).
+4. **Connected App `ipRelaxation`** — `ENFORCE` makes that OAuth client honor 1 and 2.
+
+Cross-check empirically with `SELECT SourceIp, Status, LoginType FROM LoginHistory ORDER BY
+LoginTime DESC LIMIT 200`. If successful logins already come from residential IPs, nothing is
+gating on source IP.
+
+**When SSO is in play the SF-side settings are usually moot.** PROD federates to Entra ID
+(`SamlSsoConfig` = `Entra ID SSO`, tenant `d5c15341`), so location enforcement lives in Entra
+Conditional Access, not Salesforce. Check
+`az rest --url https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies` and
+`.../namedLocations` as well.
 
 ---
 
