@@ -277,12 +277,18 @@ showed the domain rules weren't tunneling. Live state: **16 access-route entries
 unidentified Akamai entries and the Fifth Third `/32` stay removed. All HA-synced to AVSPAN02 and
 verified identical. **WH and FR still carry the old IP-pinned lists**; AU skipped (site closing).
 
+**Removing the ADP CIDRs broke ADP Time & Attendance for ~20 minutes** (job 346, 15:40–15:59 EDT).
+That module enforces an IP allowlist and otherwise returns *"Access denied… from a location that is
+not authorized by your company."* It is the entire reason ADP is in the split tunnel. The four narrow
+ranges **were working**; trading them for an unproven `*.adp.com` domain entry took the routes away
+with nothing functional behind them.
+
 **ADP needs the whole `/16`, not slices.** `170.146.0.0/16` is entirely ADP's own netblock
-(`ADP-ESNET`). ADP's GSLB rotates hosts across it — `time.adp.com` at `.92.217`, `online` at `.93.x`,
-`clock` at `.96.x`, `ipay` at `.97.x`, `workforcenow` at `.102.193`. The old four ranges started at
-`.96` and so **never covered `time.adp.com`**, which is the one host the split tunnel existed for:
-ADP Time &amp; Attendance enforces an IP allowlist and otherwise returns *"Access denied… from a
-location that is not authorized by your company."*
+(`ADP-ESNET`, whois-verified), and it's a strict superset of the four ranges that worked. ADP's front
+door `online.adp.com` (CNAME `oneline.gslb2.adp.com`) actively rotates — observed flipping `.93.123`
+→ `.104.12` inside one 16-second sample — and both `time.adp.com` and `workforcenow.adp.com` are 301
+redirects to it. A real post-fix session tunneled to `.102.193`, `.92.217`, `.93.123` and `.104.12`;
+only the first was covered before. Verified working 15:59 EDT.
 
 **PAN logs are EDT; Frank and his Mac are PDT.** Add 3 hours to a local screenshot/file timestamp
 before comparing it to a firewall job or log time. Getting this backwards inverts before/after
