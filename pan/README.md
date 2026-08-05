@@ -186,18 +186,70 @@ split-tunneling/
 
 xpath: `.../entry[@name='EMPLOYEES']/split-tunneling/include-domains/list`
 
-**Verified on AVSPAN01 2026-08-05:** PAN-OS **11.2.13**, both `include-domains` and
-`exclude-domains` present and currently **empty**. Requires GP app **5.2+** on endpoints
-(Frank's Mac runs 6.3.3, so fine).
+#### Element form: `<entry name="…">`, NOT `<member>`
+
+Same trap as tunnel interface IPs. `<list><member>*.adp.com</member></list>` fails with
+`include-domains -> list is invalid` (code 12). The list takes named entries:
+
+```bash
+XP="/config/devices/entry[@name='localhost.localdomain']/vsys/entry[@name='vsys1']/global-protect/global-protect-gateway/entry[@name='GP_GATEWAY']/remote-user-tunnel-configs/entry[@name='EMPLOYEES']/split-tunneling"
+
+curl -sk "https://avspan01.cpp-db.com/api/" \
+  --data-urlencode "type=config" --data-urlencode "action=set" --data-urlencode "key=$TOKEN" \
+  --data-urlencode "xpath=$XP/include-domains" \
+  --data-urlencode "element=<list><entry name=\"*.salesforce.com\"/><entry name=\"salesforce.com\"/></list>"
+```
+
+Remove one entry (this is the rollback):
+`action=delete xpath=$XP/include-domains/list/entry[@name='*.adp.com']` — leaves `<list/>`, i.e. the
+original empty state. `action=complete` for schema introspection on these nodes returns
+`Internal error` (code 3), so build the element on the candidate and read it back instead.
+
+**Wildcards:** `*.adp.com` matches subdomains but **not** the parent, so add both `*.adp.com` and
+`adp.com`. (`*adp.com` — no dot — matches both, but also matches anything ending in `adp.com`.)
+
+**Verified on AVSPAN01 2026-08-05:** PAN-OS **11.2.13**. Requires GP app **5.2+** (**6.1+** on
+Linux); all 56 connected users were on 6.3.x. Requires tunnel-mode (`<tunnel-mode>yes</tunnel-mode>`
+— already set). Portal agent `split-tunnel-option` is `network-traffic`, which is correct; `both`
+would additionally domain-split DNS itself.
+
+#### ⚠️ Windows domain-based split tunnel is TCP-only
+
+Per PAN docs: **no UDP, no ICMP** for domain-based rules on Windows (macOS uses network extensions,
+Linux is domain/route only — no application rules). On this fleet **52 of 56 users are Windows**.
+
+This is the thing to weigh before replacing a CIDR with a domain: an `access-route` entry captures
+every protocol, a domain entry captures TCP. **QUIC (UDP 443) will silently egress locally** rather
+than tunnel. So for entries that exist specifically so a SaaS sees the office egress IP, a domain
+entry is necessary-but-maybe-not-sufficient — verify with real traffic before dropping the CIDR.
+
+Also: a domain rule can only match traffic that resolved a hostname. **Traffic to a literal IP never
+matches** — so SSH-by-IP entries (the AWS Lightsail /32s) must stay as `access-route` CIDRs forever.
+
+**Capacity:** 200 entries max per include/exclude domain list in the gateway config. Hosting a
+split-tunnel config file on a web server raises the ceiling to 1,000 domains+routes.
 
 **When to prefer it over `access-route`:** any SaaS endpoint whose IPs rotate. Example that forced
 the question — `api.sparkpost.com` resolves to **rotating AWS IPs on a 60 s TTL**: 18 unique
 addresses across 18 different /16s in a 5-minute sample, spanning 34/8, 35/8, 44/8, 52/8, 54/8.
 Pinning that by CIDR would mean tunnelling most of AWS us-west-2. A domain entry handles it.
 
-Note the existing `access-route` list already pins several SaaS providers by IP (Salesforce
-`136.146.0.0/15`, `96.43.144.0/20`, `204.14.232.0/21`; Akamai `2.18.x`). Those are candidates to
-convert to domain entries if they ever drift.
+**They had already drifted.** Confirmed 2026-08-05: `themyersbriggs.my.salesforce.com` and
+`themyersbriggs.lightning.force.com` resolve to Salesforce Hyperforce `155.226.145.x`, which is in
+**none** of the four pinned SFDC ranges (`96.43.144.0/20`, `136.146.0.0/15`, `182.50.76.0/22`,
+`204.14.232.0/21`) — only `login.salesforce.com` still lands in `136.146.0.0/15`. Treat every
+IP-pinned SaaS entry as suspect until re-resolved.
+
+#### Deployed state — AVS `EMPLOYEES` (2026-08-05, commit job 343)
+
+Six `include-domains` entries added **alongside** the existing 30 `access-route` CIDRs, none removed:
+`*.salesforce.com`, `salesforce.com`, `*.force.com`, `force.com`, `*.adp.com`, `adp.com`.
+HA-synced to AVSPAN02; WH/FR untouched, AU skipped (site closing). Phase 2 — dropping the 8
+superseded Salesforce/ADP CIDRs — is pending real-traffic verification. Per-entry identification of
+the whole list lives in `task-tracker/projects/pan/pan-split-tunnel-review/README.md`.
+
+**Log retention will not tell you what's unused.** AVSPAN01 keeps only ~26 hours of traffic logs, so
+a split tunnel entry showing zero hits is unproven, not dead. Don't propose removals from that.
 
 **Caveats before changing this:** it affects every connected EMPLOYEES user (56 at time of
 writing) and needs a commit. HA is active-passive and `running-sync: synchronized`, so a commit on
@@ -558,10 +610,14 @@ can leave `daily` sitting alongside `none`.
 
 Re-enable by editing the same xpath back to the `<daily>` form.
 
-**Take a restore point first:** `<save><config><to>pre-change-YYYYMMDD.xml</to></config></save>` on
-each peer (candidate == running when pending-changes is `no`, so this is a clean snapshot). Restore
-with `<load><config><from>…</from></config></load>` + commit. Also record the original `at` times
-per peer — they differ between peers, so a snapshot alone doesn't tell you which value belongs where.
+> **Do not take device config snapshots.** Frank does not want `<save><config><to>…</to></config></save>`
+> restore points left on the firewalls (told 2026-08-05). Get safety from verifying `pending-changes`
+> is `no`, building and reading back the **candidate** config, and rehearsing the reversal on the
+> candidate before committing. Delete a stray one with
+> `<delete><config><saved>FILE</saved></config></delete>`.
+
+**Record the original `at` times per peer** before changing them — they differ between peers, so
+you need the per-peer values written down to do a targeted re-enable.
 
 ### When to disable
 
