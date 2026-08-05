@@ -169,6 +169,40 @@ Key fields: tunnel interface, IKE gateway, IPsec crypto profile, DPD restart.
 - xpath: `/config/devices/entry/vsys/entry/global-protect/global-protect-gateway/entry/remote-user-tunnel-configs/entry[@name='EMPLOYEES']/split-tunneling/access-route`
 - Element to add a network: `<member>10.50.240.0/22</member>`
 
+### Domain-based split tunnel — use this for anything with rotating IPs
+
+The `split-tunneling` node has **four** siblings beyond `access-route`, and they are easy to miss
+(GUI: Split Tunnel → **"Domain and Application"** tab, separate from the Access Route tab):
+
+```
+split-tunneling/
+  access-route            <- destination CIDRs (the familiar one)
+  exclude-access-route
+  include-domains/list    <- domain-based INCLUDE
+  exclude-domains/list
+  include-applications
+  exclude-applications
+```
+
+xpath: `.../entry[@name='EMPLOYEES']/split-tunneling/include-domains/list`
+
+**Verified on AVSPAN01 2026-08-05:** PAN-OS **11.2.13**, both `include-domains` and
+`exclude-domains` present and currently **empty**. Requires GP app **5.2+** on endpoints
+(Frank's Mac runs 6.3.3, so fine).
+
+**When to prefer it over `access-route`:** any SaaS endpoint whose IPs rotate. Example that forced
+the question — `api.sparkpost.com` resolves to **rotating AWS IPs on a 60 s TTL**: 18 unique
+addresses across 18 different /16s in a 5-minute sample, spanning 34/8, 35/8, 44/8, 52/8, 54/8.
+Pinning that by CIDR would mean tunnelling most of AWS us-west-2. A domain entry handles it.
+
+Note the existing `access-route` list already pins several SaaS providers by IP (Salesforce
+`136.146.0.0/15`, `96.43.144.0/20`, `204.14.232.0/21`; Akamai `2.18.x`). Those are candidates to
+convert to domain entries if they ever drift.
+
+**Caveats before changing this:** it affects every connected EMPLOYEES user (56 at time of
+writing) and needs a commit. HA is active-passive and `running-sync: synchronized`, so a commit on
+the active peer propagates — but verify both peers per the usual PAN discipline.
+
 ## GlobalProtect Client Management
 
 GP client packages are managed on the firewall and pushed to endpoints by GlobalProtect gateway.
