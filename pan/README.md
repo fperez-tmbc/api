@@ -240,13 +240,19 @@ Pinning that by CIDR would mean tunnelling most of AWS us-west-2. A domain entry
 `204.14.232.0/21`) — only `login.salesforce.com` still lands in `136.146.0.0/15`. Treat every
 IP-pinned SaaS entry as suspect until re-resolved.
 
-#### Deployed state — AVS `EMPLOYEES` (2026-08-05, commit job 343)
+#### Deployed state — AVS `EMPLOYEES` (2026-08-05, commit jobs 343 then 346)
 
-Six `include-domains` entries added **alongside** the existing 30 `access-route` CIDRs, none removed:
-`*.salesforce.com`, `salesforce.com`, `*.force.com`, `force.com`, `*.adp.com`, `adp.com`.
-HA-synced to AVSPAN02; WH/FR untouched, AU skipped (site closing). Phase 2 — dropping the 8
-superseded Salesforce/ADP CIDRs — is pending real-traffic verification. Per-entry identification of
-the whole list lives in `task-tracker/projects/pan/pan-split-tunnel-review/README.md`.
+Job 343 added six `include-domains` entries: `*.salesforce.com`, `salesforce.com`, `*.force.com`,
+`force.com`, `*.adp.com`, `adp.com`. Job 346 then removed 19 `access-route` CIDRs (10 unidentified
+Akamai, 4 Salesforce, 4 ADP, 1 Fifth Third), taking the list from 30 IP entries to **11**. Both
+HA-synced to AVSPAN02 and verified identical. **WH and FR still carry the old IP-pinned lists**;
+AU skipped permanently (site closing).
+
+Removing an IP list is one `action=edit` on `$XP/access-route` with an `<access-route>` element
+containing every member you want to survive — `edit` replaces the node, so include the keepers.
+Capture the original members first and diff against them; the exact 19 removed here, plus per-entry
+identification of the whole list, are in
+`task-tracker/projects/pan/pan-split-tunnel-review/README.md`.
 
 **Log retention will not tell you what's unused.** AVSPAN01 keeps only ~26 hours of traffic logs, so
 a split tunnel entry showing zero hits is unproven, not dead. Don't propose removals from that.
@@ -563,8 +569,26 @@ Verify instead with `type=config action=get` on the xpath plus a pending-changes
 commit the returned nodes carry `admin="…" dirtyId="1" time="…"` attributes; after a successful
 commit those attributes are gone and `pending-changes` is `no`. Absent attributes + `no` = committed.
 
+> ### ⚠️ The dirty-attribute grep trap — hit twice now
+>
 > Watch for those attributes when grepping. `grep -oE "<update-schedule>"` silently matches nothing
 > once the tag becomes `<update-schedule admin="…" dirtyId="1">`. Match `<update-schedule[^>]*>`.
+>
+> **This applies to `<member>` too, and it bites hardest mid-change.** Verifying an uncommitted
+> `access-route` edit with `grep -c '<member>'` returns **0** — not because the edit failed but because
+> every member is now `<member admin="2fperez" dirtyId="4" time="…">`. It reads exactly like you just
+> wiped a production list. (Happened 2026-08-05 during the GP split-tunnel cleanup.)
+>
+> Always parse attribute-tolerantly, and prefer diffing against a captured list over counting:
+>
+> ```bash
+> routes() { curl -sk "https://$1/api/" --data-urlencode "type=config" --data-urlencode "action=get" \
+>   --data-urlencode "key=$TOKEN" --data-urlencode "xpath=$XP/access-route" \
+>   | grep -oE '<member[^>]*>[^<]+</member>' | sed -E 's/<member[^>]*>//;s#</member>##'; }
+> ```
+>
+> The counts flip back to matching a plain `<member>` grep after commit, which is why this only ever
+> shows up in pre-commit verification and looks like a disaster when it does.
 
 ## Dynamic Update Schedules
 
