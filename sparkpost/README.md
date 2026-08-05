@@ -45,11 +45,27 @@ misdiagnosis ("key revoked") and, separately, a QA email outage.
 
 | Symptom | Actual meaning |
 |---|---|
-| **401 on every endpoint** | your source IP is not on that key's allowlist |
+| **200s, plus 403 on `/api-keys` + `/users`** | key valid **and** source IP allowlisted — this is "working" |
+| **401 on every endpoint** | auth rejected. **IP not allowlisted OR key revoked/rotated — the API cannot tell you which** |
 | **403 on `/api-keys` and `/users` only** | normal and permanent, see below |
 | **404 on `/transmissions`, `/snippets`, `/message-events`** | normal, see Endpoint matrix |
 | **429** | rate limited, wait 1–5 s |
 | **420** | daily/monthly sending cap hit |
+
+**The 401 is not diagnosable from outside.** Verified 2026-08-05: a blocked IP, a deliberately
+bogus key, and no `Authorization` header at all return **byte-identical** responses —
+`HTTP 401`, `{"errors": [ {"message": "Unauthorized."} ]}`, no distinguishing header. So do not
+report "the key is dead" or "the IP was removed" from a 401 alone.
+
+Triage order:
+
+1. `curl -s https://api.ipify.org` — has your egress changed? IP drift is the common cause.
+2. Has `~/GitHub/.tokens/sparkpost` been modified? (`stat -f '%Sm'`)
+3. If both are unchanged and it worked recently, the change was made **in the console** — check
+   Configuration → API Keys for both the key's existence and its Allowed IPs.
+
+The useful positive signal is the **403 on `/api-keys`**: if you get that, the key is good and your
+IP is allowlisted, because auth succeeded and only the endpoint was refused.
 
 `TMBC_Admin` is allowlisted to:
 
