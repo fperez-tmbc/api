@@ -67,15 +67,22 @@ Triage order:
 The useful positive signal is the **403 on `/api-keys`**: if you get that, the key is good and your
 IP is allowlisted, because auth succeeded and only the endpoint was refused.
 
-`TMBC_Admin` is allowlisted to:
+`TMBC_Admin` allowlist:
 
-| IP | What it is |
-|---|---|
-| `20.95.36.96` | office egress for **GlobalProtect-tunnelled** traffic |
-| `73.170.17.34` | Frank's home IP, added 2026-08-05 — **residential, will change** |
+| IP | What it is | Status |
+|---|---|---|
+| `20.95.36.96` | office egress for **GlobalProtect-tunnelled** traffic | standing |
+| `73.170.17.34` | Frank's home IP, residential | **added ~19:00, removed by ~20:49 on 2026-08-05** |
+
+**API access from a workstation is granted on request, not standing.** On 2026-08-05 Frank
+allowlisted the current egress for a task (all endpoints 200) and withdrew it afterwards (all
+endpoints 401, with egress and key file both unchanged). So expect no access by default: ask for the
+current egress IP to be allowlisted for the duration of the work, and expect it to lapse.
 
 **GlobalProtect is split-tunnel and `api.sparkpost.com` is NOT in the tunnel routes**, so calls
-from a Mac egress the local ISP even with GP connected. Connecting GP does not fix a 401.
+from a Mac egress the local ISP even with GP connected. Connecting GP does not fix a 401. Adding
+`api.sparkpost.com` to GP `include-domains` would route it via `20.95.36.96` and remove the
+per-IP request cycle entirely — see `project-gp-domain-split-tunnel`, still not done for SparkPost.
 
 **Always check egress before blaming the key:**
 
