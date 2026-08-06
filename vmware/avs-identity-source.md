@@ -39,9 +39,62 @@ Certificates: two, issued by `CN=CPP-SUB-CA, DC=cpp-db, DC=com`, valid until **2
 Thumbprints `E1D5653002C3279B4BF4F3B65F96FF2B566C2F24` and
 `9EE3BDAC1E030B77D6363C4AB456AC6791D972B7`.
 
-CloudAdmins nesting (`Get-CloudAdminGroups`): `cloudadmins-avs`, plus two stale 2024 leftovers
-`avs_cloudadmins` and `avs cloudadmins` that no longer correspond to live AD groups. Harmless
-but worth cleaning up with `Remove-GroupFromCloudAdmins`.
+CloudAdmins nesting (`Get-CloudAdminGroups`): **`cloudadmins-avs` only**, as of 2026-08-05.
+Two stale 2024 leftovers, `avs_cloudadmins` and `avs cloudadmins`, were removed that day — see
+below, the mechanism matters.
+
+## CloudAdmins membership is stored by NAME, not SID
+
+Confirmed 2026-08-05. This has a security consequence worth understanding before anyone
+renames or deletes an AVS-related AD group.
+
+A group nested into `vsphere.local\CloudAdmins` is recorded as `groupname@domain`. Delete or
+rename the AD group and the entry **stays behind**, pointing at a name. Recreate any AD group
+with that name and it **silently inherits the CloudAdmin role** — no approval step, no
+permission entry in the vSphere Client, nothing to notice.
+
+`cpp-db.com` carried two such orphans for roughly two years, from the 2024-09 → 2024-11 → 2025-05
+renames (`AVS CloudAdmins` → `AVS_CloudAdmins` → `CloudAdmins-AVS`). Anyone who happened to
+create a group with an old name would have been handed vCenter CloudAdmin.
+
+The entries also survive `Remove-ExternalIdentitySources` and a full re-add. Removing the
+identity source does not clean them up.
+
+### Removing an orphaned entry — chicken and egg
+
+`Remove-GroupFromCloudAdmins` resolves the group in AD **before** removing the reference, so it
+cannot remove an entry whose AD group no longer exists:
+
+```
+ERROR: (400) avs_cloudadmins was not found in cpp-db.com.
+Please ensure that the group is spelled correctly
+```
+
+This is the same failure in the 2024-11-12 history. The fix is to briefly recreate the group:
+
+1. Create the AD group with the exact orphaned name, **empty**, any OU inside the base DN
+2. `Remove-GroupFromCloudAdmins -Domain cpp-db.com -GroupName <name>`
+3. Delete the AD group again
+4. Repeat per orphan, then confirm with `Get-CloudAdminGroups`
+
+The group stays empty and lives under a minute, so nothing can authenticate through it. Names
+containing spaces need the whole token quoted:
+`--parameter name=GroupName type=Value "value=AVS CloudAdmins"`.
+
+Creating and deleting the group over LDAPS from macOS, as Domain Admin:
+
+```bash
+export LDAPTLS_REQCERT=never
+PASS=$(~/GitHub/.tokens/kv-get.sh da-cpp-db-com)
+# create (groupType -2147483646 = global security group)
+ldapmodify -x -H "ldaps://svdcdc01.cpp-db.com:636" -D "ntsupport@cpp-db.com" -w "$PASS" -f group.ldif
+# delete
+ldapdelete -x -H "ldaps://svdcdc01.cpp-db.com:636" -D "ntsupport@cpp-db.com" -w "$PASS" \
+  "CN=<name>,OU=Security,OU=Groups,OU=TheMBC,DC=cpp-db,DC=com"
+```
+
+**When retiring an AVS-related AD group in future, run `Remove-GroupFromCloudAdmins` first,
+while the group still exists.** Deleting it in AD first creates one of these orphans.
 
 ## The search-base gotcha (fixed 2026-08-05, keep for diagnosis)
 
