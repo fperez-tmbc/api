@@ -149,31 +149,67 @@ Use this pattern any time you see:
 
 ## End User Laptops
 
-End user endpoints are **not directly routable** from Frank's GlobalProtect connection. The pattern is:
-1. SSH into SVPDQHQ01 (10.70.16.209) — jump onto the internal network
-2. From SVPDQHQ01, use `Invoke-Command` over WinRM to reach the endpoint
+> **Stale-note correction (2026-08-05):** this section previously used `svcclaude`. That AD identity
+> was dismantled 2026-07-27 (see the banner at the top of this file) and the PDQ SSH user is
+> `claude`, not `svcclaude`. Use the Key Vault DA account for the endpoint hop.
 
-**svcclaude does not have standing local admin on endpoints.** Before running any commands, provide Frank with the `net` command to add svcclaude, and wait for confirmation that it's been added:
+**Why a jump box is required, not merely convenient:** macOS PowerShell has **no WSMan client**.
+`Invoke-Command -ComputerName` fails with *"This parameter set requires WSMan, and no supported WSMan
+client library was found"*, and `Test-WSMan` is not even a recognized cmdlet. There is also no
+`impacket` or `smbclient` on the Mac, so open 135/445 buy nothing. Anything WinRM must originate from
+a Windows host.
 
-```
-net localgroup administrators CPP-DB\svcclaude /add
+**Pick the path by where the target is:**
+
+| Target location | Path |
+|---|---|
+| Same LAN as the Mac | **Direct SSH** — no jump box (see below) |
+| On GlobalProtect, elsewhere | SSH to SVPDQHQ01 → `Invoke-Command` to the GP address |
+| Corporate LAN | SSH to SVPDQHQ01 → `Invoke-Command` |
+
+### Direct SSH to a laptop on the same LAN (verified 2026-08-05, HQNOFRANKP02)
+
+Works once the NIC's firewall profile allows it — see the firewall-profile gotcha below, which is
+what blocks this by default.
+
+```bash
+SSHPASS=$(~/GitHub/.tokens/kv-get.sh da-cpp-db-com) sshpass -e ssh -n -q \
+  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  ntsupport@<laptop-ip> '<command>'
 ```
 
-After the session, Frank removes it:
-```
-net localgroup administrators CPP-DB\svcclaude /delete
-```
+Use the **UPN form** `ntsupport@cpp-db.com` or bare `ntsupport`; the `CPP-DB\ntsupport` form works for
+ssh but the backslash gets mangled by the local shell, so avoid it. Windows 11 ships
+`OpenSSH_for_Windows_9.5`.
 
 ### Pattern — SSH to SVPDQHQ01, then Invoke-Command to endpoint
 
-```bash
-PASS=$(grep '^PASSWORD=' ~/GitHub/.tokens/svcclaude | cut -d'=' -f2-)
+PDQ SSH creds: `~/GitHub/.tokens/patching` → `$PDQ_PASS`, user `claude` (see `api/pdq/`).
 
-sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no svcclaude@svpdqhq01.cpp-db.com \
-  "powershell -Command \"Invoke-Command -ComputerName TARGET -Credential (New-Object PSCredential('CPP-DB\svcclaude', (ConvertTo-SecureString '$PASS' -AsPlainText -Force))) -ScriptBlock { COMMAND }\""
+```bash
+source ~/GitHub/.tokens/patching
+SSHPASS="$PDQ_PASS" sshpass -e ssh -n -q -o StrictHostKeyChecking=no \
+  claude@SVPDQHQ01.cpp-db.com "powershell -NoProfile -EncodedCommand <b64>"
 ```
 
-For multi-line or complex scripts, use `-EncodedCommand` for the outer PowerShell call (see PowerShell via SSH section below) and embed the `Invoke-Command` block inside.
+Build the payload so **no secret ever lands in a command line**, and target the endpoint's **GP
+address** when it is remote:
+
+```bash
+# template with __DAPW__ / __KEY__ placeholders, substituted in python, then UTF-16LE + base64
+B64=$(python3 -c "import base64,sys;print(base64.b64encode(open(sys.argv[1]).read().replace('__DAPW__',sys.argv[2]).encode('utf-16-le')).decode())" tpl.ps1 "$DAPW")
+```
+
+**Gotchas learned the hard way (2026-08-05):**
+- `powershell -Command -` **does** read stdin over SSH, but the session can close before a
+  long-running remote command finishes, yielding **silent empty output**. Use `-EncodedCommand` for
+  anything slow.
+- `-EncodedCommand` output is prefixed with `#< CLIXML` progress noise — filter with
+  `grep -vE 'CLIXML|^<Objs|Objs>'`.
+- cmd.exe caps the remote command line at ~8191 chars; a UTF-16LE+base64 payload is ~2× the script
+  size, so keep scripts small (a 1.5 KB script encoded to ~2.8 KB, comfortably under).
+- Unquoted bash heredocs mangle `\`-escapes in PowerShell. Use a **quoted** heredoc plus placeholder
+  substitution.
 
 **Note:** `Enter-PSSession` is interactive — Frank drives those manually. Use `Invoke-Command` for anything I'm running.
 
@@ -248,18 +284,51 @@ Use UPN format (`user@domain`) as the SSH username for domain accounts:
 ssh -i ~/.ssh/id_ed25519 "2fperez@themyersbriggs.com"@server.cpp-db.com
 ```
 
-### Windows: Firewall profile gotcha
+### Windows: Firewall profile gotcha — THE most common "port is closed" cause
 
-SSH (and WinRM) inbound rules created by Windows default to `Profile=Private`. If the target connects via GlobalProtect VPN, its PANGP adapter is classified as `DomainAuthenticated` — traffic arrives on a Domain-profile interface and is silently dropped even though sshd is listening on `0.0.0.0`.
+SSH and WinRM inbound rules created by Windows default to **`Profile=Private`**. Any interface not
+classified Private then drops the traffic, even though sshd listens on `0.0.0.0` and there is no
+explicit deny rule.
 
-**Symptoms:** SSH times out, `bytes_received=0` in firewall logs, sshd listening correctly, no explicit deny rule.
+**Symptoms:** port shows closed / SSH times out, `bytes_received=0` in firewall logs, sshd listening
+correctly, no deny rule anywhere.
 
-**Fix:**
-```cmd
-netsh advfirewall firewall set rule name="OpenSSH SSH Server (sshd)" new profile=domain,private
+**Diagnose — do not guess, these two commands settle it:**
+```powershell
+Get-NetIPAddress -AddressFamily IPv4 | Select IPAddress,InterfaceAlias   # which IP is on which NIC
+Get-NetConnectionProfile | Select InterfaceAlias,NetworkCategory         # which NIC is which profile
+Get-NetFirewallRule -Name OpenSSH-Server-In-TCP | Select Enabled,Profile # what the rule covers
+```
+Then compare: the profile of the NIC holding the IP you are dialing must appear in the rule's
+`Profile`. Test the port **from the actual source host**, since results differ per interface.
+
+**Two real cases, and they behaved differently — do not over-generalize from either:**
+
+| Case | Rule profile | Target NIC / category | Result |
+|---|---|---|---|
+| FRAUDREYL02, 2026-05-27 | `Private` | GP adapter, `DomainAuthenticated` | **dropped** |
+| HQNOFRANKP02, 2026-08-05 | `Private` | GP adapter `Ethernet 5`, `DomainAuthenticated` | **worked** (reachable from SVPDQHQ01) |
+| HQNOFRANKP02, 2026-08-05 | `Private` | home LAN `Ethernet`, **`Public`** | **dropped** |
+
+The `Public` case is unambiguous and was the real blocker on Frank's laptop. Why the GP/Domain path
+worked on one host and not the other is **not explained** — same Private-only rule, same
+`DomainAuthenticated` category. Treat "Domain adapter + Private rule" as *unpredictable* and verify
+per host rather than assuming either outcome.
+
+**Fix — prefer reclassifying the network over widening the rule:**
+```powershell
+# best: a home/office LAN should be Private, not Public (narrower than editing the rule)
+Set-NetConnectionProfile -InterfaceIndex <ifIndex> -NetworkCategory Private
+```
+Windows 11 25H2 exposes this in the GUI (network properties → Private), which is the quickest route.
+
+Alternative, if the classification must stay Public:
+```powershell
+Set-NetFirewallRule -Name OpenSSH-Server-In-TCP -Profile Private,Public
 ```
 
-Proper fix: ensure the GPO pushing the SSH rule defines `Profile=Domain|Profile=Private`. See `knowledge-base/troubleshoot/fraudreyl02-ssh-gpo-2026-05-27.md` for the full case.
+For GPO-managed endpoints, ensure the GPO pushing the SSH rule defines `Profile=Domain|Private`.
+Full earlier case: `knowledge-base/troubleshoot/fraudreyl02-ssh-gpo-2026-05-27.md`.
 
 ### Windows: Exchange Management Shell via SSH
 
