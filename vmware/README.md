@@ -1,53 +1,67 @@
 # vSphere REST API — AVS vCenter Field Notes
 
-
-> ## WARNING: `svcclaude`'s AD rights were dismantled 2026-07-27
+> ## Account: `ntsupport@cpp-db.com` (changed 2026-08-05)
 >
-> The account was **not deleted everywhere** — the picture is mixed, so read carefully:
+> `svcclaude` is **dead for vCenter**. Its password rotated 2026-07-27 *and* its vCenter role
+> assignment was removed, leaving only baseline ReadOnly entries. Do not retry it or burn
+> lockout budget on it. It still works as a **PAN-OS local account** (firewalls have their own
+> user database, key auth verified 2026-08-02 on AVSPAN01/WHPAN01) — that is unrelated.
 >
-> | Where | State |
-> |---|---|
-> | `cpp-db.com` | **Exists, but powerless** — zero group memberships, zero delegated ACEs, removed from local Administrators on ~26 machines. Retained *only* so vCenter and the PAN firewalls can authenticate it. |
-> | `cpp-web.com`, `opp.local`, `oppashapp.local`, `oppnewapp.local` | **Deleted outright.** |
-> | PAN-OS local account | ✅ **Still works** — firewalls have their own user database. Key auth verified 2026-08-02 (AVSPAN01, WHPAN01). |
-> | vCenter login | Retained by design — but see the password note below. |
+> Password lives in Azure Key Vault, not on disk: `~/GitHub/.tokens/kv-get.sh da-cpp-db-com`.
 >
-> **Its password was rotated 2026-07-27**, so `~/GitHub/.tokens/svcclaude` holds a stale value.
-> That is why auth fails with `Permission denied` / `The user name or password is incorrect` —
-> it reads like a simple bad password, but the rights are gone too. **Do not retry it or burn
-> lockout budget on it.**
+> Rights come from AD group `CloudAdmins-AVS`, nested into `vsphere.local\CloudAdmins`
+> (role `CloudAdmin`). There is **no per-user permission entry** for `ntsupport`, by design.
 >
-> **Use instead:**
-> - **WinRM as `CPP-DB\2fperez`** — `Invoke-Command -ComputerName <fqdn> -ScriptBlock {...}`.
->   `2fperez` is a Domain Admin in cpp-db.com. The proven day-to-day path.
-> - **Azure Key Vault `kv-tmbc-secrets`** — `~/GitHub/.tokens/kv-get.sh <secret>`. Account names
->   live in each secret's Azure **tags**. DA per domain: `ntsupport` (cpp-db.com, cpp-web.com),
->   `#domain` (opp.local, oppashapp.local, oppnewapp.local).
->
-> The transport-level patterns below (sshpass on Windows, `-EncodedCommand`, NetBIOS-vs-UPN,
-> loopback workarounds) remain correct — substitute a live account in the examples.
-> Full detail: `api/ssh/README.md`.
+> Full identity-source detail, run-command history and blast radius: **`avs-identity-source.md`**.
 
 ## Connection
 
 | Field | Value |
 |-------|-------|
 | vCenter host | `vc.ed044990b4444c86b72971.eastus2.avs.azure.com` |
-| Credentials | `~/GitHub/.tokens/svcclaude` (key=value: `USERNAME` / `PASSWORD`) |
+| Account | `ntsupport@cpp-db.com` |
+| Password | Key Vault secret `da-cpp-db-com` via `~/GitHub/.tokens/kv-get.sh` |
 | Base URL | `https://vc.ed044990b4444c86b72971.eastus2.avs.azure.com/api` |
+| Break-glass | `cloudadmin@vsphere.local`, see below |
 
 ## Authentication
 
-Session tokens are the only supported method. Obtain once per session; no expiry header is documented but treat as short-lived (re-auth if you get a 401).
+Session tokens are the only supported method. Obtain once per session; no expiry header is documented but treat as short-lived (re-auth if you get a 401). A successful auth returns **201**.
 
 ```bash
-USER=$(grep '^USERNAME' ~/GitHub/.tokens/svcclaude | cut -d= -f2)
-PASS=$(grep '^PASSWORD' ~/GitHub/.tokens/svcclaude | cut -d= -f2)
-TOKEN=$(curl -sk -X POST \
-  "https://vc.ed044990b4444c86b72971.eastus2.avs.azure.com/api/session" \
+VC=vc.ed044990b4444c86b72971.eastus2.avs.azure.com
+USER=ntsupport@cpp-db.com
+PASS=$(~/GitHub/.tokens/kv-get.sh da-cpp-db-com)
+TOKEN=$(curl -sk -X POST "https://$VC/api/session" \
   -u "${USER}:${PASS}" \
   -H "Content-Type: application/json" | tr -d '"')
 ```
+
+### Break-glass — `cloudadmin@vsphere.local`
+
+Local SSO account, independent of AD. Use it when the identity source is broken or mid-change.
+Retrieve live, never store:
+
+```bash
+az vmware private-cloud list-admin-credentials \
+  --private-cloud avs-tmbc-us --resource-group rg-avs-us \
+  --subscription f3a21a2c-2b41-4c96-b758-8d4ee4556046
+```
+
+### A 401 usually means "not visible", not "wrong password"
+
+`401 UNAUTHENTICATED` with an empty `messages` array — or PowerCLI
+`Could not find VIAccount with name '<DOMAIN>\<user>'` — normally means the account sits
+**outside the identity source's base DN**, so vCenter cannot see it at all. Group membership
+does not help: the user lookup happens first, so `CloudAdmins-AVS` membership is never
+evaluated.
+
+Both base DNs are `DC=cpp-db,DC=com` as of 2026-08-05. Before that they were
+`OU=TheMBC,DC=cpp-db,DC=com`, which hid every account in the default `CN=Users` container,
+`ntsupport` among them. See `avs-identity-source.md` before touching any credential.
+
+NSX-T has a separate LDAP config with a different base DN. An account working in NSX proves
+nothing about vCenter.
 
 Use the token on every subsequent request:
 
@@ -131,7 +145,7 @@ Guest power operations require VMware Tools to be running in the VM.
 - **Disk resize:** REST API `PATCH /hardware/disk/{id}` does not support `capacity` or any capacity field — the `update_spec` has no capacity field at all. Use PowerCLI `Set-HardDisk -CapacityGB` instead. Requires `VirtualMachine.Config.DiskExtend` privilege on the VM.
 - **Cannot extend a disk while a snapshot exists** — vCenter blocks `Set-HardDisk -CapacityGB` if the VM has any snapshot. Check `Get-Snapshot -VM $vm` is empty first; never take a "safety" snapshot *before* an extend. Any rollback snapshot must come *after* the extend.
 - **Growing C: is usually blocked by the WinRE recovery partition** sitting at the end of the disk, right after C: — new VMDK space lands behind it and C: can't extend (`Get-PartitionSupportedSize -DriveLetter C` shows `SizeMax` == current size even after the grow). Fix = grow the VMDK, then relocate the recovery partition. Full end-to-end procedure: `knowledge-base/procedures/vm-disk-expand-winre-relocation.md` (reference script `knowledge-base/scripts/Expand-RecoveryPartition.ps1`).
-- **Guest process execution:** `POST /api/vcenter/vm/{vm}/guest/processes` returns 404 on AVS — guest operations API is not available. Use SSH (port 22 — OpenSSH enabled on domain-joined Windows Server VMs) or WinRM (port 5985) instead. SSH with UPN format: `sshpass -p "$PASS" ssh "svcclaude@cpp-db.com@<ip>"`.
+- **Guest process execution:** `POST /api/vcenter/vm/{vm}/guest/processes` returns 404 on AVS — guest operations API is not available. Use SSH (port 22 — OpenSSH enabled on domain-joined Windows Server VMs) or WinRM (port 5985) instead. SSH with UPN format: `sshpass -p "$PASS" ssh "ntsupport@cpp-db.com@<ip>"`.
 - **Windows disk → vSphere disk mapping:** Windows Disk N corresponds to vSphere SCSI 0:N (disk ID 200N). Disk 0 = C: (OS), subsequent disks follow SCSI unit order. Verify via SSH: `Get-Partition | Where-Object {$_.DriveLetter} | Select-Object DiskNumber, DriveLetter`.
 - **Windows partition extension after disk resize:** After growing the VMDK, SSH in and run `Resize-Partition -DiskNumber N -PartitionNumber N -Size (Get-PartitionSupportedSize ...).SizeMax` to extend the NTFS partition.
 - **Reading guest files when RDP/WinRM/SSH are all closed:** a freshly-deployed Windows guest often has only SMB (445) open. Mount its `C$` admin share from macOS with local creds and read logs directly — no jumpbox needed: `mount_smbfs -N "//administrator:<urlenc-pass>@<ip>/C$" <mountpoint>` (URL-encode the password, e.g. `,`→`%2C`, `$`→`%24`). Unmount with `umount`.
@@ -139,54 +153,53 @@ Guest power operations require VMware Tools to be running in the VM.
 
 ## Role & Permission Management
 
-When an operation fails with "Permission to perform this operation was denied", identify the missing privilege and offer to add it to the `TMBC - Automation Access` role before falling back to an alternative approach.
+`ntsupport` holds the `CloudAdmin` role through `CloudAdmins-AVS`, so real privilege gaps are
+rare. A denial is more often a stale session token or a resolution problem — work the 401
+section above first.
 
-### Check what privileges a role has
+### How access is actually granted
+
+There is **no per-user permission entry** for `ntsupport`. Rights flow:
+
+```
+CPP-DB\ntsupport  ->  CPP-DB\CloudAdmins-AVS  ->  vsphere.local\CloudAdmins  ->  CloudAdmin role
+```
+
+Verify the AD half without touching vCenter:
+
+```bash
+PASS=$(~/GitHub/.tokens/kv-get.sh da-cpp-db-com)
+ldapsearch -x -H ldap://10.70.16.14 -D "ntsupport@cpp-db.com" -w "$PASS" \
+  -b "DC=cpp-db,DC=com" "(cn=CloudAdmins-AVS)" member
+```
+
+Verify the vCenter half with an AVS run command (`Get-CloudAdminGroups`), see
+`avs-identity-source.md`.
+
+### `TMBC - Automation Access` is dormant
+
+The role still exists with 35 privileges (power ops, `Config.DiskExtend`, `Config.Rename`,
+snapshots, `Inventory.Move`, `Provisioning.ReadCustSpecs`; no clone/deploy) but as of
+2026-08-05 it is assigned to **nobody** — `svcclaude`'s assignment was removed. Do not assume
+it is in play when reasoning about effective rights.
 
 ```powershell
 $role = Get-VIRole -Name "TMBC - Automation Access"
-$role.PrivilegeList | Sort-Object   # full list
-$role.PrivilegeList | Where-Object { $_ -like "VirtualMachine.Config.*" }  # filtered
+$role.PrivilegeList | Sort-Object
+Get-VIPermission | Where-Object { $_.Role -like "TMBC*" }   # who actually holds TMBC roles
 ```
 
-### Check whether svcclaude has a specific privilege (any assigned role)
-
-```powershell
-$perms = Get-VIPermission | Where-Object { $_.Principal -like "*svcclaude*" }
-foreach ($perm in $perms) {
-    $r = Get-VIRole -Name $perm.Role
-    $hit = $r.PrivilegeList | Where-Object { $_ -like "*Config.Settings*" }
-    if ($hit) { Write-Host "Found in role: $($perm.Role) on $($perm.Entity)" }
-}
-```
-
-### Add a privilege to the role
-
-```powershell
-$role = Get-VIRole -Name "TMBC - Automation Access"
-Set-VIRole -Role $role -AddPrivilege (Get-VIPrivilege -Id "VirtualMachine.Config.Settings")
-```
-
-To find the exact privilege ID when you only know part of the name:
-
-```powershell
-Get-VIPrivilege | Where-Object { $_.Id -like "*Config.Settings*" } | Select-Object Id, Name
-```
-
-### Notes
-
-- `TMBC - Automation Access` is the role that covers `svcclaude` at the `Datacenters` level with propagation — changes here apply to all VMs automatically.
-- Changes to a role take effect immediately; no vCenter restart or re-login required.
-- Adding a privilege here widens access for anything else using that role — confirm with Frank before making changes.
+Adding a privilege to a shared role widens access for everything using it. Confirm with Frank
+first. Role changes take effect immediately; no restart or re-login needed.
 
 ## PowerCLI Fallback
 
-Use PowerCLI for operations the REST API does not expose (rename, move to folder/resource pool):
+Use PowerCLI for operations the REST API does not expose (rename, move to folder/resource pool, disk resize):
 
 ```powershell
-$creds = Get-Content (Join-Path $HOME "GitHub/.tokens/svcclaude") | ConvertFrom-StringData
+$pw = & "$HOME/GitHub/.tokens/kv-get.sh" da-cpp-db-com
 Connect-VIServer -Server "vc.ed044990b4444c86b72971.eastus2.avs.azure.com" `
-    -User $creds.USERNAME -Password $creds.PASSWORD -Force | Out-Null
+    -User "ntsupport@cpp-db.com" -Password $pw -Force | Out-Null
 
 # Rename
 Set-VM -VM (Get-VM -Name "<name>") -Name "<new name>" -Confirm:$false
