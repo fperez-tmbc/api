@@ -1,17 +1,25 @@
 #!/usr/bin/env zsh
 # ============================================================================
-# WARNING: uses `svcclaude`, whose AD rights were DISMANTLED 2026-07-27.
-# The account still EXISTS in cpp-db.com but has zero group memberships, zero
-# delegated ACEs, and was removed from local Administrators on ~26 machines.
-# It was DELETED outright in cpp-web.com, opp.local, oppashapp.local and
-# oppnewapp.local. Its password was ROTATED 2026-07-27, so the value in
-# ~/GitHub/.tokens/svcclaude is stale.
-# => This script will fail as written.
-# Use instead: WinRM as CPP-DB\2fperez, or a Key Vault domain-admin cred
-#   (~/GitHub/.tokens/kv-get.sh <secret>; usernames are in the secrets' tags).
-# STILL WORKING: the PAN-OS local account named svcclaude (key auth, verified
-# 2026-08-02) and svcclaude's vCenter login - the account is retained for those two.
-# See api/ssh/README.md.
+# Authenticates as the target domain's Domain Admin, retrieved from Azure Key
+# Vault at run time. Nothing is read from ~/GitHub/.tokens/ and no password
+# touches disk.
+#
+#   Domain            KV_SECRET             SSH_USER
+#   cpp-db.com        da-cpp-db-com         cpp-db\ntsupport      (default)
+#   cpp-web.com       da-cpp-web-com        cpp-web\ntsupport
+#   opp.local         da-opp-local          opp\#domain
+#   oppashapp.local   da-oppashapp-local    oppashapp\#domain
+#   oppnewapp.local   da-oppnewapp-local    oppnewapp\#domain
+#
+# Override per zone:  KV_SECRET=da-opp-local SSH_USER='opp\#domain' \
+#                     DNS_SERVER=mkpdvdmc01.opp.local ./dns-update.sh ...
+#
+# These are Domain Admin accounts: this script makes ONE auth attempt and does
+# not retry. Never loop it over candidate credentials.
+#
+# Do NOT switch this back to `svcclaude` — that AD identity was dismantled
+# 2026-07-27 (deleted outright in cpp-web.com and the three OPP domains). It is
+# retained for PAN-OS and vCenter only. See api/ssh/README.md.
 # ============================================================================
 
 # dns-update.sh — Update DNS records on a Windows DNS server via SSH + dnscmd
@@ -36,15 +44,20 @@
 
 set -o pipefail
 
-CREDS_FILE="/Users/fperez2nd/GitHub/.tokens/svcclaude"
+KV_GET="/Users/fperez2nd/GitHub/.tokens/kv-get.sh"
+KV_SECRET="${KV_SECRET:-da-cpp-db-com}"
 DEFAULT_SERVER="SVDCDC01.cpp-db.com"
-SSH_USER="${SSH_USER:-cpp-db\\svcclaude}"
+SSH_USER="${SSH_USER:-cpp-db\\ntsupport}"
 
-if [[ ! -f "$CREDS_FILE" ]]; then
-  echo "ERROR: creds file not found at $CREDS_FILE" >&2
+if [[ ! -x "$KV_GET" ]]; then
+  echo "ERROR: Key Vault helper not found or not executable at $KV_GET" >&2
   exit 1
 fi
-source "$CREDS_FILE"
+PASSWORD=$("$KV_GET" "$KV_SECRET") || { echo "ERROR: could not retrieve KV secret '$KV_SECRET'" >&2; exit 1; }
+if [[ -z "$PASSWORD" || "$PASSWORD" == "PENDING" ]]; then
+  echo "ERROR: KV secret '$KV_SECRET' is empty or still PENDING — ask Frank to fill it" >&2
+  exit 1
+fi
 
 OPERATION="${1:?Usage: $0 <operation> <zone> <name> <target> [ttl]}"
 ZONE="${2:?Missing zone}"
@@ -65,9 +78,10 @@ run_cmd() {
   local cmd="$1"
   local encoded
   encoded=$(printf '%s' "$cmd" | iconv -t UTF-16LE | base64 | tr -d '\n')
-  sshpass -p "$PASSWORD" ssh -q \
+  sshpass -p "$PASSWORD" ssh -q -n \
     -o StrictHostKeyChecking=no \
     -o UserKnownHostsFile=/dev/null \
+    -o NumberOfPasswordPrompts=1 \
     "${SSH_USER}@${SERVER}" \
     "powershell -NonInteractive -EncodedCommand $encoded"
 }

@@ -1,17 +1,21 @@
 #!/usr/bin/env zsh
 # ============================================================================
-# WARNING: uses `svcclaude`, whose AD rights were DISMANTLED 2026-07-27.
-# The account still EXISTS in cpp-db.com but has zero group memberships, zero
-# delegated ACEs, and was removed from local Administrators on ~26 machines.
-# It was DELETED outright in cpp-web.com, opp.local, oppashapp.local and
-# oppnewapp.local. Its password was ROTATED 2026-07-27, so the value in
-# ~/GitHub/.tokens/svcclaude is stale.
-# => This script will fail as written.
-# Use instead: WinRM as CPP-DB\2fperez, or a Key Vault domain-admin cred
-#   (~/GitHub/.tokens/kv-get.sh <secret>; usernames are in the secrets' tags).
-# STILL WORKING: the PAN-OS local account named svcclaude (key auth, verified
-# 2026-08-02) and svcclaude's vCenter login - the account is retained for those two.
-# See api/ssh/README.md.
+# RETIRED 2026-08-06 — DO NOT RUN. Kept for historical reference only.
+#
+# This script's entire purpose was to DELEGATE DNS rights to `svcclaude`. Those
+# rights were deliberately torn down on 2026-07-27: every delegated ACE removed
+# from all five domain roots, group memberships stripped in cpp-db.com, and the
+# account DELETED outright in cpp-web.com / opp.local / oppashapp.local /
+# oppnewapp.local. Running this would UNDO that teardown and re-create a
+# privileged path that was removed on purpose. It would also fail partway: the
+# account no longer exists in four of the five domains.
+#
+# svcclaude is retained for PAN-OS and vCenter ONLY.
+#
+# There is nothing to replace this with: DNS work now authenticates as the
+# target domain's Domain Admin from Azure Key Vault, which already holds the
+# rights this script used to grant. No delegation step is needed.
+# See api/dns/README.md and api/ssh/README.md.
 # ============================================================================
 
 # dns-setup-svcclaude.sh — Grant svcclaude DNS management rights on remote domains
