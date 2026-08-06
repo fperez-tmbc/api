@@ -1002,7 +1002,13 @@ These apply the Strict definition to specific named individuals to prevent displ
 
 ## Synchronisation Engine (MSE) — Exchange tasks
 
-Console path: `Archive → Exchange Services`. TMBC runs **one** MSE site, **SVAZADSYNCDC01**
+Console path: `Governance & Compliance → Archive` → the **Governance, Compliance & Insights (GCI)**
+page → **Exchange Services** (under *Administration*; *"Manage folder replication, calendar
+synchronization, and mailbox management features"*). The MSE instances themselves are
+**Synchronization Engine Sites** on that same page. The in-page breadcrumb reads
+`Archive > Exchange Services`, which is not a navigable path on its own.
+
+TMBC runs **one** MSE site, **SVAZADSYNCDC01**
 (10.70.16.41 — the AAD Connect box), engine **4.5.0.525**, service `msesrv` as
 `NT AUTHORITY\NetworkService`. Three tasks, each on its own daily schedule (the CAL one is
 `TheMBC Daily Sync Schedule 08:00`), all scoped to the **same distribution list**:
