@@ -62,6 +62,23 @@ This also writes `managementlogkey` and `managementlogkey-cert.pub`. Keep all of
 require kubeconfig and SSH keys for upgrades, log collection and future credential rotations.
 Before 2026-08-05 the only copy lived on a VM that had been off for a year.
 
+**Backed up in 1Password**, vault `IT Operations`, as three documents (checksums verified
+against the local copies 2026-08-05):
+
+| Document | Item ID |
+|---|---|
+| `AVS Arc Resource Bridge - kubeconfig (avs-tmbc-us)` | `tuwagf5fy2prfdsguamf434l4m` |
+| `AVS Arc Resource Bridge - managementlogkey (avs-tmbc-us)` | `sga2sqf3wmq5pzcsutjoo7uft4` |
+| `AVS Arc Resource Bridge - managementlogkey-cert.pub (avs-tmbc-us)` | `fexnweavdrt3kgnmb4jb4l2fuy` |
+
+```bash
+op document get <item-id> --out-file <name>
+```
+
+The local copy under `~/GitHub/.tokens/` stays the working copy since the CLI reads from there;
+1Password is the durable backup. If the bridge is ever redeployed these are stale — re-run
+`get-credentials` and re-upload.
+
 ### The procedure
 
 ```bash
