@@ -373,6 +373,143 @@ a split tunnel entry showing zero hits is unproven, not dead. Don't propose remo
 writing) and needs a commit. HA is active-passive and `running-sync: synchronized`, so a commit on
 the active peer propagates — but verify both peers per the usual PAN discipline.
 
+## GlobalProtect Authentication — the gate is in Entra, not on the firewall
+
+Reading the firewall config alone **will lead you to a wrong conclusion here.** Verified 2026-08-05.
+
+| Layer | Value |
+|---|---|
+| Auth profile | `ENTRA_ID_GLOBALPROTECT`, method **`saml-idp`** only |
+| SAML server profile | `ENTRA_ID_GLOBALPROTECT_2028`, tenant `d5c15341` |
+| PAN-side MFA | `mfa-enable: no` — PAN's own MFA layer is off; MFA is Entra CA's job |
+| Auth-profile allow-list | `all` |
+| Gateway `client-auth` allow-list | none, at any site |
+| Local user database | **empty** on all devices |
+| Other auth profiles | only `MGMT_AUTH_PROFILE` (LDAP), for firewall admin login |
+
+**The authorization gate is Entra enterprise app assignment.** One GP app per site, all with
+`appRoleAssignmentRequired: true`:
+
+| App | Assigned groups |
+|---|---|
+| GlobalProtect - AVS | `VPN`, `Consultants-VPN`, `Consultants-Plus_VPN`, `GP_MTU_1300` |
+| GlobalProtect - WH / AU / FR | `VPN` |
+
+Consequences:
+
+1. **The absent firewall-side allow-list is not a finding.** An identity not assigned the `VPN` group
+   cannot authenticate regardless of firewall config.
+2. **There is no password-accepting path for GP.** SAML only plus an empty local user DB, so credential
+   spraying against the portal cannot succeed by design. A `gateway-auth` failure reading
+   `Invalid username or password` is the gateway rejecting a form POST it structurally cannot accept,
+   **not** a credential being tested.
+3. `source-user` on a tunnel config is **post-authentication authorization** — which tunnel config a user
+   receives. Aligned to `cn=vpn` on all four sites 2026-08-05.
+
+### `validate-idp-certificate: no` and `want-auth-requests-signed: no` are CORRECT — do not "fix" them
+
+Researched 2026-08-05 against vendor docs. Both are expected for an Entra IdP. **Reviewed, not a gap.**
+
+- **`validate-idp-certificate` cannot be enabled with Entra.** Palo Alto: *"If your IdP signing
+  certificate is a self-signed certificate, there is no chain of trust; as a result, you cannot enable
+  this option."* Entra's token-signing cert is self-signed by default. Enabling it would require
+  replacing that cert with a CA-issued one plus a Certificate Profile.
+- **Assertion signatures are still verified.** Palo Alto: *"The firewall always validates the signature
+  of the SAML Responses or Assertions against the Identity Provider certificate that you configure
+  whether or not you enable the Validate Identity Provider Certificate option."* The option only governs
+  chain-of-trust and revocation checking of the IdP certificate itself.
+- **`want-auth-requests-signed: no` mirrors Entra's default.** Microsoft: a `Signature` in
+  `AuthnRequest` is optional, and without *Require verification certificates* on the Entra side, Entra
+  *"doesn't validate signed authentication requests if a signature is present"* — requestor verification
+  comes from only responding to registered ACS URLs. Enabling it also breaks IdP-initiated flows
+  (MyApps, the SSO test button).
+- **CVE-2020-2021** (SAML auth bypass) is gated on `validate-idp-certificate` being unchecked, so it is
+  the reason this looks alarming. Affected: 9.1 <9.1.3, 9.0 <9.0.9, 8.1 <8.1.15, 8.0 all. **This fleet
+  runs 11.2.13 and 10.2.18-h9 — far past the fix, including the PA-220s that cannot leave 10.2.x.**
+
+Sources: [Configure SAML Authentication](https://docs.paloaltonetworks.com/ngfw/administration/authentication/configure-saml-authentication),
+[CVE-2020-2021](https://security.paloaltonetworks.com/CVE-2020-2021),
+[Enforce signed SAML authentication requests](https://learn.microsoft.com/entra/identity/enterprise-apps/howto-enforce-signed-saml-authentication).
+
+### GP logs live only in the `globalprotect` log type
+
+`type=log log-type=globalprotect`. **GP auth events do NOT appear in the `auth` log** — that log is empty
+on these devices. This matters because the log-forwarding auto-tag match-list **does not accept
+`globalprotect`** as a `log-type`; accepted values are `traffic, threat, wildfire, url, data, tunnel,
+auth, decryption`. So **you cannot auto-tag/auto-block a source IP off GP authentication failures** on
+this PAN-OS. Verified 2026-08-05, don't design around it.
+
+> ### ⚠️ Never characterise a log-based event from a capped `nlogs` sample
+>
+> `nlogs=200` on a flooded device produced a report that was wrong by ~40x — "197 attempts from 176 IPs
+> over 3 hours" when the truth was **≥7,993 attempts from 864–1,637 IPs over 18 days** — and also
+> produced a flatly false "zero successful auths at WH" when there were 12. The sample was 100% attack
+> traffic.
+>
+> Bucket by time and read the `count` attribute on the result element:
+>
+> ```
+> type=log log-type=globalprotect nlogs=5000
+> query=(eventid eq gateway-auth) and (status eq failure) and (receive_time geq '2026/07/01 00:00:00') and (receive_time leq '2026/07/12 00:00:00')
+> ```
+>
+> `nlogs` maxes at 5000, so a bucket returning exactly 5000 is **capped, not complete**. Narrow the
+> window. Filtered queries also reach further back than an unfiltered read, because the unfiltered view
+> is dominated by whatever is noisiest.
+
+## External Dynamic Lists (EDL)
+
+`GP-ATTACKERS-EDL` — the blocklist behind `gp_attackers.html`. **Editing that file changes firewall
+behaviour within the hour; it is not a report page.**
+
+| | |
+|---|---|
+| Definition | `loc="shared"` (Panorama-scoped), type IP, **hourly** recurring |
+| URL | `https://stpanedlus.z20.web.core.windows.net/gp_attackers.html` |
+| Cert profile | `AZURE_ISSUING_CA` |
+| Hosting | Azure storage acct `stpanedlus`, container `$web`, RG `rg-paloalto-us`, content-type `text/plain` |
+| Editing auth | **account key, not RBAC.** `--auth-mode login` fails; use `az storage account keys list` |
+| Enforced by | rule `DROP_BRUTE_FORCE` — from `UNTRUST`, source = the EDL, **action drop**, no logging |
+
+Format is one `IP/32` per line, **no HTML despite the extension**, trailing newline. Preserve
+`text/plain` on upload. The page must stay publicly readable for the unauthenticated fetch, so **never
+put usernames or anything roster-like in it.**
+
+### Refresh and show — the `<type><ip>` element is required
+
+```
+type=op cmd=<request><system><external-list><refresh><type><ip><name>GP-ATTACKERS-EDL</name></ip></type></refresh></external-list></system></request>
+type=op cmd=<request><system><external-list><show><type><ip><name>GP-ATTACKERS-EDL</name></ip></type></show></external-list></system></request>
+```
+
+Omitting `<type><ip>` returns code 17 `request -> system -> external-list -> refresh -> name unexpected
+here`, which reads like a syntax problem elsewhere. `show object external-list` **does not exist**.
+
+`show` returns `total-valid` / `total-ignored` / `total-invalid`, plus a **100-entry display cap** —
+`count="100"` beside `total-count="972"` is pagination, not truncation. A malformed line (e.g. a stray
+dot: `185.220.100.248./32`) shows up as `total-invalid` and is silently skipped.
+
+A second refresh while one runs returns `CLI Refresh for the same external dynamic list is in progress` —
+that is a wait, not a failure. PA-220s are slow: AU took ~4 minutes of polling while AVS/WH/FR were
+near-instant.
+
+**EDLs are reactive, not preventive.** Against the Jul 2026 campaign the list covered ~11–20% of observed
+sources and every IP added was previously unseen. Don't count a blocklist as the control against a
+rotating pool.
+
+### The `BAD_IPs` auto-tag pipeline exists and has NEVER fired
+
+Fully wired on all four sites and completely inert. Worth knowing before you design anything on top of it:
+
+- log-forwarding profile `LOG_BAD_IPs` → match-list `MATCH_BAD_IPs`, **log-type `threat`**,
+  filter `(action neq 'alert') and (action neq 'allow') and (zone.src eq 'UNTRUST')`
+- action `TAG_BAD_IPs` → registers **source-address** with tag `BAD_IPs`, timeout 43200 min (30 days)
+- security rule `DROP_BAD_IPs`, action **drop**, consumes the tag
+
+`<show><object><registered-ip><all/></registered-ip></object></show>` returns **0 on all four
+firewalls**. It requires a threat log with a blocking action from UNTRUST, and the profile is referenced
+by only one rule. Either repair it or remove it, so config reflects reality.
+
 ## GlobalProtect Client Management
 
 GP client packages are managed on the firewall and pushed to endpoints by GlobalProtect gateway.
