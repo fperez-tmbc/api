@@ -181,8 +181,12 @@ role assignment if that tradeoff ever stops being acceptable.
 For hybrid environments where mailboxes are `RemoteUserMailbox`, on-prem Exchange cmdlets must be run on the Exchange server. Direct WinRM from macOS is not available (no WSMan client in PowerShell Core on macOS).
 
 **Server:** `SVEXCHDC01.cpp-db.com`  
-**Account:** `svcclaude@cpp-db.com` (member of Organization Management)  
-**Credentials:** `~/.tokens/svcclaude`
+**Host login:** `cpp-db\ntsupport` — `PASS=$(~/GitHub/.tokens/kv-get.sh da-cpp-db-com)`  
+**Exchange RBAC:** ⚠️ **verify, don't assume.** svcclaude *was* in Organization Management and was
+**removed from it 2026-07-27**; being a Domain Admin does not confer Exchange RBAC. Check with
+`Get-ManagementRoleAssignment -GetEffectiveUsers -Role "Organization Management"` before relying
+on the account, and if it is absent, ask Frank to run the task as `CPP-DB\2fperez` (Exchange
+Administrator) or to grant the role.
 
 ### Connection Pattern
 
@@ -190,7 +194,7 @@ SSH to SVEXCHDC01, then create a `New-PSSession` to the Exchange PowerShell HTTP
 
 ```powershell
 $pass = ConvertTo-SecureString '<password>' -AsPlainText -Force
-$cred = New-Object System.Management.Automation.PSCredential('CPP-DB\svcclaude', $pass)
+$cred = New-Object System.Management.Automation.PSCredential('CPP-DB\ntsupport', $pass)
 $opts = New-PSSessionOption -SkipCACheck -SkipCNCheck -SkipRevocationCheck
 $s = New-PSSession `
     -ConfigurationName Microsoft.Exchange `
@@ -207,7 +211,7 @@ To run this non-interactively from macOS, encode the script as base64 and pass v
 
 ```powershell
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
-& sshpass -p $pass ssh -o StrictHostKeyChecking=no "svcclaude@cpp-db.com@SVEXCHDC01.cpp-db.com" `
+& sshpass -p $pass ssh -o StrictHostKeyChecking=no "cpp-db\\ntsupport@SVEXCHDC01.cpp-db.com" `
     "powershell.exe -EncodedCommand $encoded"
 ```
 
@@ -220,7 +224,7 @@ $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
 - **`-SkipCACheck -SkipCNCheck -SkipRevocationCheck`** required in `New-PSSessionOption` when Exchange is using a self-signed or internal CA cert.
 - **PSSession loopback from SVEXCHDC01 to itself fails:** Creating a `New-PSSession` to `https://SVEXCHDC01.cpp-db.com/PowerShell/` from within an SSH session on SVEXCHDC01 fails with `-2144108477`. WinRM loopback is blocked. The PSSession must be created from a *different* machine. Same applies to `localhost` as the URI.
 - **Exchange snap-in (`Add-PSSnapin`) fails for AD writes under SSH:** The snap-in loads but Exchange cmdlets that write to AD fail with "The supplied credential is invalid" because the SSH logon session has no Kerberos TGT. Use the PSSession approach with explicit `-Authentication Basic` credentials instead — this works even from SVEXCHDC01 when initiated from a different source machine.
-- **Working "different source machine" for the loopback restriction:** SSH to a cpp-db.com DC (`svdcdc01.cpp-db.com`), then `New-PSSession` to SVEXCHDC01's Exchange endpoint from there. Verified 2026-07-08. Note `svdcdc01` uses **password** SSH (`svcclaude@cpp-db.com`, creds `.tokens/svcclaude`) — the ed25519 key is rejected on that host. A DC also lets you run `Get-ADUser` natively in the same session for lookups.
+- **Working "different source machine" for the loopback restriction:** SSH to a cpp-db.com DC (`svdcdc01.cpp-db.com`), then `New-PSSession` to SVEXCHDC01's Exchange endpoint from there. Verified 2026-07-08. Note `svdcdc01` uses **password** SSH (`cpp-db\ntsupport`, KV secret `da-cpp-db-com`) — the ed25519 key is rejected on that host. A DC also lets you run `Get-ADUser` natively in the same session for lookups.
 - **`Invoke-Command -Session $s -ScriptBlock {…}` against the Exchange endpoint fails** with `The syntax is not supported by this runspace … ScriptsNotAllowed`. The Exchange PowerShell endpoint is a constrained (NoLanguage) runspace, so it rejects script blocks containing language constructs (`Write-Output`, `Where-Object {…}`, variables). Use **`Import-PSSession`** instead — the generated proxy functions run language constructs locally and marshal only the cmdlet calls to the remote runspace.
 - **`Add-ADPermission -Identity` does not resolve a primary SMTP address:** it's an AD-level cmdlet, not a recipient cmdlet, so `-Identity 'dev@themyersbriggs.com'` fails with "wasn't found." Recipient cmdlets (`Get/Set-DistributionGroup`) accept the SMTP address, but `Add-ADPermission`/`Get-ADPermission` need the **DistinguishedName** (or Name / `DOMAIN\sam`). Fetch it first: `$dn = (Get-DistributionGroup -Identity <smtp>).DistinguishedName`, then `Add-ADPermission -Identity $dn -User 'CPP-DB\fperez' -ExtendedRights 'Send As'`.
 - **Granting delegates on a synced DL end-to-end:** set `GrantSendOnBehalfTo` (Send on Behalf) with `Set-DistributionGroup` and `Send As` with `Add-ADPermission` on-prem, then trigger a **full** AAD Connect sync (`Start-ADSyncSyncCycle -PolicyType Initial` on SVAZADSYNCDC01) — delta does not propagate `publicDelegates`. Do NOT try to set these in the EXO/M365 admin console for a synced DL; it renders the editor but the write fails with "Failed to update delegates at this moment."

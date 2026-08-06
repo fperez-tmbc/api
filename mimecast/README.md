@@ -1000,6 +1000,75 @@ These apply the Strict definition to specific named individuals to prevent displ
 | Tracey Skates | Internal | Strict | From Tracey Skates |
 | William Chapman | Internal | Strict | From William Chapman |
 
+## Synchronisation Engine (MSE) — Exchange tasks
+
+Console path: `Archive → Exchange Services`. TMBC runs **one** MSE site, **SVAZADSYNCDC01**
+(10.70.16.41 — the AAD Connect box), engine **4.5.0.525**, service `msesrv` as
+`NT AUTHORITY\NetworkService`. Three tasks, all on schedule `TheMBC Daily Sync Schedule 08:00`
+and all scoped to the **same distribution list**:
+
+| Task | Code | Name | Fires |
+|---|---|---|---|
+| 11359 | `MMS` | TheMBC Folder Replication | 00:00 |
+| 11360 | `CAL` | TheMBC Calendar Sync | 08:00 |
+| 11361 | `MDS` | TheMBC Mailbox Permission Sync | 16:00 |
+
+**MSE task and definition config is NOT API-readable** — console only, same as Permitted Senders.
+The engine's own logs on the host are the only real diagnostic surface; see
+`reference-svazadsyncdc01` memory for the log paths, the `DDMMYYYY` timestamp format, and the
+`ProgramData\Mimecast Synchronisation Engine\Logs\CUSA34A243\` per-task log.
+
+> ### ⚠ "contains no mailboxes" means the DL never RESOLVED. The group is not empty.
+>
+> ```
+> Task wasn't started because CN=<guid>,DC=myersbriggsco,DC=onmicrosoft,DC=com contains no mailboxes
+> ```
+>
+> Diagnosed 2026-08-06. The message is a prerequisite-check failure, and the wording sends you off
+> to audit group membership, which is a dead end. The MSE log shows what actually happens:
+>
+> ```
+> DirectoryDistributionListResolver | Resolving name with Office 365
+> PowershellController          | getting recipient <guid>@myersbriggsco.onmicrosoft.com
+> WARN PowershellController     | recipient with identifier <guid>@myersbriggsco.onmicrosoft.com not found
+> DirectoryDistributionListResolver | was not resolved
+> WARN AbstractModularExecutor  | prerequisite check failed: ... contains no mailboxes
+> ```
+>
+> MSE takes the stored DN, sees an `onmicrosoft.com` suffix, picks its **Office 365** resolver, and
+> joins `CN` + `DC` parts into a recipient identity — `<guid>@myersbriggsco.onmicrosoft.com`. EXO
+> `Get-Recipient` cannot resolve that: it parses as an SMTP address and is not one of the group's
+> `proxyAddresses`. Zero mailboxes resolved → "contains no mailboxes".
+>
+> **The real cause is WHICH directory tree the group was picked from.** Mimecast Directory Sync
+> holds two copies of every synced group, and their DNs are shaped differently:
+>
+> | Mimecast tree | DN shape | MSE resolver |
+> |---|---|---|
+> | `myersbriggsco.onmicrosoft.com` (Azure AD / O365 connector) | `CN=<Entra objectId>,DC=myersbriggsco,DC=onmicrosoft,DC=com` | Office 365 → **fails**, CN is a GUID |
+> | `cpp-db.com → TheMBC → Groups → Distribution` (on-prem AD connector) | `CN=DL Workforce,…,DC=cpp-db,DC=com` | CN is the real group name |
+>
+> TMBC's three tasks are bound to the **Azure AD** copy, so all three have failed every day for at
+> least the full 8-day log retention — zero successes. Fix direction: re-select the group in each
+> definition from the **on-prem AD** tree, then re-run and watch
+> `DirectoryDistributionListResolver` in the log to confirm the identity it builds.
+>
+> **Verify the group before believing the error.** `directory/find-groups` + `get-group-members`
+> showed `DL Workforce` populated in *both* trees (129 and 128 flattened members, 86–87 users plus
+> 42 nested DLs, all `internal: true`). Entra shows only **4 direct** members — a nested group plus
+> three users — because Mimecast's sync flattens nesting and Graph does not. A "4 members" reading
+> from Graph is not evidence of an empty group.
+>
+> To tell which tree a group came from, walk `parentId` up the `find-groups` result:
+> ```python
+> byid = {f['id']: f for f in folders}          # page fully: pageSize 500 + follow meta.pagination.next
+> # DL Workforce <- myersbriggsco <- onmicrosoft <- com          => Azure AD connector
+> # DL Workforce <- Distribution <- Groups <- TheMBC <- cpp-db <- com  => on-prem AD connector
+> ```
+>
+> The Mimecast **audit log carries no MSE task/definition events** (66 days checked, only Directory
+> Sync / policy / logon types), so it cannot date when a task was re-pointed.
+
 ## Useful Commands
 
 ```bash

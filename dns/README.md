@@ -34,33 +34,31 @@ Internal DNS updates via SSH + PowerShell DnsServer cmdlets.
 
 ### On SVDCDC01
 1. **OpenSSH Server** must be installed and running (`sshd` service) ✓
-2. **svcclaude** must be a member of the **DnsAdmins** group in AD ✓
-3. **SSH key auth** — deploy `~/.ssh/id_ed25519.pub` to svcclaude's authorized_keys ✓
-   - Key lives at `C:\Users\svcclaude\.ssh\authorized_keys` (standard user location)
-4. **Zone ACL** — DnsAdmins alone doesn't grant write access to AD-integrated zone records.
-   Run `grant-dns-acl.ps1` once as a domain admin to grant svcclaude Full Control on all zones:
-   ```powershell
-   .\grant-dns-acl.ps1          # apply
-   .\grant-dns-acl.ps1 -WhatIf  # dry run
-   ```
-   The script covers all three AD partitions (DomainDnsZones, ForestDnsZones, System).
-   Re-run if new zones are added.
-   - `CNF:` entries (replication conflict objects) will always fail with "bad syntax" — expected and harmless, ignore them.
+2. **Authenticate as the domain's Domain Admin** — `cpp-db\ntsupport`, KV secret
+   `da-cpp-db-com`. A DA already holds DnsAdmins-equivalent rights *and* write access to the
+   AD-integrated zone records, so steps 2–4 of the old svcclaude setup (DnsAdmins membership,
+   key deployment, `grant-dns-acl.ps1`) are **no longer prerequisites**.
+3. **`grant-dns-acl.ps1` is retained for reference only.** It granted the retired svcclaude
+   delegation Full Control on all zones across the three AD partitions (DomainDnsZones,
+   ForestDnsZones, System). Do not run it to re-delegate svcclaude.
+   - `CNF:` entries (replication conflict objects) always fail with "bad syntax" — expected and
+     harmless, ignore them.
 
 ### Verifying access
 ```bash
 zsh -c '
 ENCODED=$(printf "dnscmd SVDCDC01.cpp-db.com /enumzones" | iconv -t UTF-16LE | base64 | tr -d "\n")
-ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes "cpp-db\\svcclaude"@SVDCDC01.cpp-db.com \
+ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes 'cpp-db\\ntsupport'@SVDCDC01.cpp-db.com \
   "powershell -NonInteractive -EncodedCommand $ENCODED"
 '
 ```
 
 ## Credentials
 
-- **File:** `/Users/fperez2nd/GitHub/.tokens/svcclaude`
-- **Format:** `USERNAME=svcclaude@cpp-db.com` / `PASSWORD=...`
-- **SSH key:** `~/.ssh/id_ed25519`
+- **Retrieve:** `PASS=$(~/GitHub/.tokens/kv-get.sh da-cpp-db-com)` — bare password string, never
+  written to disk. Swap the secret name for the target zone's domain (see the skill's zone table).
+- **SSH user:** `cpp-db\ntsupport` (or `<domain>\#domain` for the OPP domains)
+- **One auth attempt per account, never loop** — these are Domain Admins.
 
 ## Default Server
 

@@ -75,7 +75,7 @@ Enumerate before guessing an account name:
 
 **Two different identities share this name. Do not conflate them.**
 
-- ❌ **AD account `CPP-DB\svcclaude`** — still exists in cpp-db.com but stripped of all groups and ACEs, removed from local Administrators everywhere, and **password rotated 2026-07-27**. Deleted outright in the other four domains. `~/GitHub/.tokens/svcclaude` holds the pre-rotation password and is useless. Retained purely so **vCenter** and the **PAN firewalls** can still authenticate it — not for general AD or server work.
+- ❌ **AD account `CPP-DB\ntsupport`** — still exists in cpp-db.com but stripped of all groups and ACEs, removed from local Administrators everywhere, and **password rotated 2026-07-27**. Deleted outright in the other four domains. `~/GitHub/.tokens/svcclaude` holds the pre-rotation password and is useless. Retained purely so **vCenter** and the **PAN firewalls** can still authenticate it — not for general AD or server work.
 - ✅ **PAN-OS local account `svcclaude`** — **still valid and working.** Firewalls keep their own local user database, so none of the AD teardown touched it. Verified 2026-08-02 against AVSPAN01 and WHPAN01 — key auth succeeded and returned the `svcclaude@AVSPAN01(active)>` prompt.
   - **Ed25519 key (PAN-OS 11.x — AVSPAN, WHPAN, DCPANORAMA01):** `~/GitHub/.tokens/svcclaude-key`
   - **RSA 4096 key (PAN-OS 10.2.x — AUPAN, FRPAN):** `~/GitHub/.tokens/svcclaude-key-rsa`
@@ -109,11 +109,11 @@ Before defaulting to sshpass, consider whether a better method is appropriate:
 
 ```bash
 # Step 1 — key auth
-ssh -o StrictHostKeyChecking=no svcclaude@TARGET "command"
+ssh -o StrictHostKeyChecking=no cpp-db\\ntsupport@TARGET "command"
 
 # Step 2 — if "Permission denied (publickey,...)", retry with password
-PASS=$(grep '^PASSWORD=' ~/GitHub/.tokens/svcclaude | cut -d'=' -f2-)
-SSHPASS="$PASS" sshpass -e /c/Windows/System32/OpenSSH/ssh.exe -o StrictHostKeyChecking=no svcclaude@TARGET "command"
+PASS=$(~/GitHub/.tokens/kv-get.sh da-cpp-db-com)
+SSHPASS="$PASS" sshpass -e /c/Windows/System32/OpenSSH/ssh.exe -o StrictHostKeyChecking=no cpp-db\\ntsupport@TARGET "command"
 ```
 
 **Why:** svcclaude's password worked on SVAZADSYNCDC01 even when key auth failed. Time was wasted on WinRM workarounds before trying the obvious fallback.
@@ -124,7 +124,7 @@ SSHPASS="$PASS" sshpass -e /c/Windows/System32/OpenSSH/ssh.exe -o StrictHostKeyC
 
 **Windows askpass GUI-popup gotcha:** When MSYS `/usr/bin/ssh` needs a password but has no interactive TTY (e.g. run from an automation/tool shell) and sshpass isn't injecting, ssh falls back to `SSH_ASKPASS` — which Git for Windows sets to `/mingw64/bin/git-askpass.exe` with `DISPLAY` pre-defined (`needs-to-be-defined`). This pops a **GUI dialog titled "Git for Windows"** on the user's desktop reading `<user>@<host>'s password:` — it looks like a rogue Git credential prompt but it's actually ssh asking for the SSH password. Two fixes, use both: (1) use the Windows OpenSSH binary + `SSHPASS=... sshpass -e` per the gotcha above so the password is injected and the fallback never fires; (2) always prefix Windows ssh calls with `SSH_ASKPASS_REQUIRE=never DISPLAY=` so ssh can never spawn the GUI helper — it fails fast on the terminal instead of popping a dialog on Frank's screen. Confirmed 2026-06-27 (svcclaude → SVVEEAMAVS01).
 
-**UPN usernames:** Windows domain hosts often require UPN format (`user@domain`) rather than bare username. Use `-l "svcclaude@cpp-db.com"` — do NOT combine as `user@host` since the `@` in the username confuses SSH host parsing.
+**UPN usernames:** Windows domain hosts often require UPN format (`user@domain`) rather than bare username. Use `-l "ntsupport@cpp-db.com"` — do NOT combine as `user@host` since the `@` in the username confuses SSH host parsing.
 
 ---
 
@@ -250,17 +250,17 @@ SVPDQHQ01 (10.70.16.209) is the primary jump box for servers and other hosts rea
 
 ```bash
 # Single hop via jump host
-ssh -J svcclaude@svpdqhq01.cpp-db.com \
+ssh -J cpp-db\\ntsupport@svpdqhq01.cpp-db.com \
     -i ~/GitHub/.tokens/svcclaude-key \
     -o StrictHostKeyChecking=no \
-    svcclaude@TARGET "command"
+    cpp-db\\ntsupport@TARGET "command"
 
 # With sshpass (if key auth fails on either hop)
-PASS=$(grep '^PASSWORD=' ~/GitHub/.tokens/svcclaude | cut -d'=' -f2-)
+PASS=$(~/GitHub/.tokens/kv-get.sh da-cpp-db-com)
 sshpass -p "$PASS" ssh \
-    -o ProxyJump="svcclaude@svpdqhq01.cpp-db.com" \
+    -o ProxyJump="cpp-db\\ntsupport@svpdqhq01.cpp-db.com" \
     -o StrictHostKeyChecking=no \
-    svcclaude@TARGET "command"
+    cpp-db\\ntsupport@TARGET "command"
 ```
 
 Note: `-J` ProxyJump uses the **local** key for the second hop — no separate password needed for the target if key auth is configured there.
@@ -374,11 +374,11 @@ Log files have `#` comment lines — skip them with `Where-Object { $_ -notmatch
 **Always use `-EncodedCommand`, never pipe a script via stdin.**
 
 ```bash
-PASS=$(grep '^PASSWORD=' ~/GitHub/.tokens/svcclaude | cut -d'=' -f2-)
+PASS=$(~/GitHub/.tokens/kv-get.sh da-cpp-db-com)
 PS_CMD='Get-Service | Where-Object Status -eq Running | Select-Object Name | Format-Table -AutoSize | Out-File C:\Windows\Temp\result.txt -Encoding UTF8'
 ENCODED=$(printf '%s' "$PS_CMD" | iconv -f UTF-8 -t UTF-16LE | base64 | tr -d '\n')
 
-sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no svcclaude@TARGET \
+sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no cpp-db\\ntsupport@TARGET \
   "powershell -NonInteractive -EncodedCommand $ENCODED"
 ```
 
@@ -400,8 +400,8 @@ ssh ... "pwsh -NonInteractive -NoProfile -EncodedCommand $ENCODED"
 
 | Host | Address | User | Auth | Notes |
 |------|---------|------|------|-------|
-| svpdqhq01.cpp-db.com | 10.70.16.209 | svcclaude | sshpass | Primary jump box; also PDQ server; use for Invoke-Command to endpoints |
-| svazadsyncdc01.cpp-db.com | — | svcclaude@cpp-db.com (UPN) | sshpass | ADSyncOperators group; use for `Start-ADSyncSyncCycle`; UPN required, use `-l "svcclaude@cpp-db.com"` |
+| svpdqhq01.cpp-db.com | 10.70.16.209 | `cpp-db\ntsupport` (KV `da-cpp-db-com`) | sshpass | Primary jump box; also PDQ server; use for Invoke-Command to endpoints |
+| svazadsyncdc01.cpp-db.com | 10.70.16.41 | `cpp-db\ntsupport` (KV `da-cpp-db-com`) | sshpass | AAD Connect **and** Mimecast Sync Engine host. Verified 2026-08-06. svcclaude was removed from local Administrators here — do not try it. Some ADSync cmdlets need session 0; see the `/entra-sync` skill |
 | sql-badc01 | 10.70.16.191 | 2fperez@themyersbriggs.com | key | SQL Server 2016; `ssh sql-badc01 -l 2fperez@themyersbriggs.com` |
 | svolprodtx01.cpp-db.com | 10.70.16.28 | root | `id_rsa_svolprodtx01` + legacy algo flags | Oracle/Postfix relay server |
 | PAN firewalls (11.x) | see pan README | svcclaude | `svcclaude-key` (ed25519) | avspan01, whpan, aupan (PAN-OS 11+) |
