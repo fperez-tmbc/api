@@ -169,12 +169,31 @@ cause, see below) or routing.
 client library was found"*, and `Test-WSMan` is not a recognized cmdlet. No `impacket` or `smbclient`
 either, so open 135/445 buy nothing. If WinRM is genuinely required, originate it from a Windows host.
 
-**Pick the path by whether port 22 answers:**
+### ⚠️ GP clients cannot reach other GP clients — this is why the jump box exists
+
+**A GlobalProtect client cannot reach another GlobalProtect client's tunnel address.** The gateway
+does not hairpin client-to-client traffic. Since the Mac is itself a GP client, **every** remote
+endpoint on GP requires a non-GP origin such as SVPDQHQ01 — regardless of the endpoint's firewall,
+and regardless of SSH being available on it.
+
+Verified 2026-08-05, same target host (`HQNOFRANKP02`), same moment:
+
+| From | To | 22 | 5985 | 3389 |
+|---|---|---|---|---|
+| Mac, a GP client (`10.255.200.94`) | `10.255.200.35` (its **GP** address) | no answer | no answer | no answer |
+| Mac | `172.16.0.86` (its **LAN** address, same physical LAN) | **open** | **open** | – |
+| SVPDQHQ01, **not** a GP client | `10.255.200.35` | **True** | **True** | – |
+
+Same host and ports answer on the LAN path and from a non-GP origin, and never from another GP
+client. So a dead GP address is **not** evidence of a firewall problem — check the origin first.
+
+**Pick the path:**
 
 | Situation | Path |
 |---|---|
-| Port 22 reachable from the Mac (same LAN, or routable) | **Direct SSH** — no jump box (see below) |
-| Port 22 blocked/unroutable, target on GlobalProtect | SSH to SVPDQHQ01 → SSH **or** `Invoke-Command` to the GP address |
+| Target on the **same LAN** as the Mac | **Direct SSH** — no jump box (see below) |
+| Target reachable at a routable non-GP address | Direct SSH |
+| Target **on GlobalProtect** (the normal remote-laptop case) | **Jump box required** — SSH to SVPDQHQ01, then SSH *or* `Invoke-Command` to the GP address |
 | Target has no SSH server at all | SSH to SVPDQHQ01 → `Invoke-Command` (WinRM) |
 
 ### Direct SSH to a laptop on the same LAN (verified 2026-08-05, HQNOFRANKP02)
