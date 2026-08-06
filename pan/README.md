@@ -131,7 +131,52 @@ Key fields: peer IP, `ethernet1/1` as local interface, IKE crypto profile, pre-s
 ```
 Key fields: tunnel interface, IKE gateway, IPsec crypto profile, DPD restart.
 
-## BGP (VR: DEFAULT)
+## Routing lookups
+
+### ⚠️ The virtual-router name is NOT `DEFAULT` everywhere
+
+| Site | VR name |
+|------|---------|
+| AVSPAN01/02 | `DEFAULT` |
+| **WHPAN01/02** | **`CORE-ROUTER`** |
+| **AUPAN01/02** | **`CORE-ROUTER`** |
+| FRPAN01/02 | `DEFAULT` |
+
+Guessing `DEFAULT` on WH or AU returns
+`DEFAULT is invalid virtual-router.Current target-vsys is none` (code 17) — which reads like a vsys or
+permissions problem and is neither. Confirm the name first:
+
+```bash
+type=config action=get \
+  xpath=/config/devices/entry[@name='localhost.localdomain']/network/virtual-router
+# take only TOP-LEVEL <entry name="..."> — a naive grep also picks up nested
+# redist-profile / protocol entries, several of which are literally called "DEFAULT"
+```
+
+### `fib-lookup` output shape
+
+```
+type=op cmd=<test><routing><fib-lookup><virtual-router>VR</virtual-router><ip>IP</ip></fib-lookup></routing></test>
+```
+
+Returns `<dp>`, `<nh>` (nexthop *type*), `<interface>`, `<ip>` (nexthop address), `<src>`, `<metric>`.
+**There is no `<dst>` element** — grepping for one yields empty on every lookup and looks like "no
+route" fleet-wide. `<nh>drop</nh>` with no interface is the real no-route signal.
+
+### Two traps that produce confidently wrong conclusions
+
+**Probing `x.x.0.1` of a `/16` proves nothing.** A subnetted `/16` usually has no route for its own
+first address, so the lookup falls through to the default route. Cost a wrong "no internal path" call on
+`10.10.0.0/16` at WH, which is in fact connected on `ae2.20`. Use `show routing route` and check for a
+covering supernet or contained subnets instead of inventing probe addresses.
+
+**A default-route result means opposite things at different sites.** AVS's default nexthop is
+`10.200.255.254`, the **core router**, so falling through to it is still an internal path. At WH/AU/FR
+the default nexthop is a public ISP address (`50.189.23.210`, `14.201.118.133`, `77.158.160.9`), so
+there the same result means no internal path and RFC1918 traffic dies upstream. Always resolve the
+device's own default route first (`fib-lookup` on `8.8.8.8`) and compare against it.
+
+## BGP (VR: DEFAULT on AVS/FR, CORE-ROUTER on WH/AU)
 
 - **Base xpath:** `/config/devices/entry[@name='localhost.localdomain']/network/virtual-router/entry[@name='DEFAULT']/protocol/bgp`
 - `install-route`: set under `bgp` node directly — `<install-route>yes</install-route>`
@@ -268,14 +313,35 @@ egressing locally. Look for the flow in the traffic log with `natsrc` = the GP e
 type=log log-type=traffic query=(addr.src in 10.255.200.0/24) and (addr.dst in 170.146.0.0/16)
 ```
 
-#### Deployed state — AVS `EMPLOYEES` (2026-08-05, commit jobs 343, 346, 349)
+#### Deployed state — FLEET ALIGNED 2026-08-05 (AVS jobs 343–359, WH 626, FR 352, AU 352)
 
-Job 343 added six `include-domains` entries: `*.salesforce.com`, `salesforce.com`, `*.force.com`,
-`force.com`, `*.adp.com`, `adp.com`. Job 346 removed 19 `access-route` CIDRs. Job 349 then **restored
-the 4 Salesforce CIDRs and replaced the 4 narrow ADP slices with `170.146.0.0/16`** once testing
-showed the domain rules weren't tunneling. Live state: **16 access-route entries + 6 domains**. The 10
-unidentified Akamai entries and the Fifth Third `/32` stay removed. All HA-synced to AVSPAN02 and
-verified identical. **WH and FR still carry the old IP-pinned lists**; AU skipped (site closing).
+**All four sites now run one baseline: 11 `access-route` entries + `api.sparkpost.com`.** AVS carries a
+12th entry, `10.201.0.0/22`, and that is the only difference anywhere in the fleet. Both HA peers match
+at every site; `pending-changes` is `no` on all 8.
+
+```
+10.10.0.0/16   10.200.0.0/16      170.146.0.0/16     + AVS only: 10.201.0.0/22
+10.30.0.0/16   13.216.79.214/32   172.31.255.0/24
+10.50.240.0/22 54.165.9.173/32    192.168.192.0/19
+10.70.0.0/16   54.243.189.17/32
+```
+
+AVS reached this over six commits (343 added 6 domain entries; 346 removed 19 CIDRs and broke ADP; 349
+restored the Salesforce CIDRs and swapped the ADP slices for the `/16`; 353 tested exact ADP FQDNs; 356
+removed all 4 Salesforce CIDRs; 359 dropped the ADP FQDNs and added `api.sparkpost.com`). WH/AU/FR were
+then aligned to it in one `edit` + one `set` each. Salesforce is now entirely out of the split tunnel
+fleet-wide, by IP and by domain, because the pins were stale and the domain rules don't tunnel.
+
+**`10.201.0.0/22` is Azure/AVS break-glass and belongs on AVS only.** It has no route in any routing
+table, which makes it look dead — it isn't. On AVS it is an address object `N-10.201.0.0_22` plus NAT
+rule `TO_AZURE-AVS_NETS` (from `GLOBALPROTECT`+`TRUST` → `UNTRUST`, source-translated to
+`10.200.255.253/30` on `ethernet1/1`), and AVS's default route uses that same interface, so the default
+route *is* the Azure path. WH/AU/FR have **zero** references to `10.201.` anywhere and their default
+routes point at local ISPs, so the same entry there would send RFC1918 to an ISP and look like
+break-glass exists when it doesn't. Do not add it to close the fleet-consistency gap.
+
+Full per-entry identification, restore blocks per site, and the ADP/Salesforce history are in
+`task-tracker/projects/pan/pan-split-tunnel-review/README.md`.
 
 **Removing the ADP CIDRs broke ADP Time & Attendance for ~20 minutes** (job 346, 15:40–15:59 EDT).
 That module enforces an IP allowlist and otherwise returns *"Access denied… from a location that is
