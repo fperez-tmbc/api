@@ -1004,8 +1004,8 @@ These apply the Strict definition to specific named individuals to prevent displ
 
 Console path: `Archive → Exchange Services`. TMBC runs **one** MSE site, **SVAZADSYNCDC01**
 (10.70.16.41 — the AAD Connect box), engine **4.5.0.525**, service `msesrv` as
-`NT AUTHORITY\NetworkService`. Three tasks, all on schedule `TheMBC Daily Sync Schedule 08:00`
-and all scoped to the **same distribution list**:
+`NT AUTHORITY\NetworkService`. Three tasks, each on its own daily schedule (the CAL one is
+`TheMBC Daily Sync Schedule 08:00`), all scoped to the **same distribution list**:
 
 | Task | Code | Name | Fires |
 |---|---|---|---|
