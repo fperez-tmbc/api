@@ -153,19 +153,29 @@ Use this pattern any time you see:
 > was dismantled 2026-07-27 (see the banner at the top of this file) and the PDQ SSH user is
 > `claude`, not `svcclaude`. Use the Key Vault DA account for the endpoint hop.
 
-**Why a jump box is required, not merely convenient:** macOS PowerShell has **no WSMan client**.
+**SSH is the primary path to Windows endpoints too.** They run `OpenSSH_for_Windows`, exactly like
+SVPDQHQ01 does, so a laptop is reachable from the Mac directly whenever port 22 is reachable. A jump
+box is needed **only when port 22 is not reachable from the Mac** — firewall profile (the usual
+cause, see below) or routing.
+
+> **Do not repeat this reasoning error (2026-08-05):** an earlier version of this section claimed the
+> jump box was required *because macOS has no WSMan client*. That is a non-sequitur — the hop to
+> SVPDQHQ01 is plain SSH, and the endpoint runs the same SSH server. The jump box was needed purely
+> because port 22 was blocked on the laptop's home NIC. The WSMan gap is only relevant when a target
+> has **no SSH server** and WinRM is the sole option.
+
+**macOS WinRM limitation — narrow, but real when it applies:** macOS PowerShell has no WSMan client.
 `Invoke-Command -ComputerName` fails with *"This parameter set requires WSMan, and no supported WSMan
-client library was found"*, and `Test-WSMan` is not even a recognized cmdlet. There is also no
-`impacket` or `smbclient` on the Mac, so open 135/445 buy nothing. Anything WinRM must originate from
-a Windows host.
+client library was found"*, and `Test-WSMan` is not a recognized cmdlet. No `impacket` or `smbclient`
+either, so open 135/445 buy nothing. If WinRM is genuinely required, originate it from a Windows host.
 
-**Pick the path by where the target is:**
+**Pick the path by whether port 22 answers:**
 
-| Target location | Path |
+| Situation | Path |
 |---|---|
-| Same LAN as the Mac | **Direct SSH** — no jump box (see below) |
-| On GlobalProtect, elsewhere | SSH to SVPDQHQ01 → `Invoke-Command` to the GP address |
-| Corporate LAN | SSH to SVPDQHQ01 → `Invoke-Command` |
+| Port 22 reachable from the Mac (same LAN, or routable) | **Direct SSH** — no jump box (see below) |
+| Port 22 blocked/unroutable, target on GlobalProtect | SSH to SVPDQHQ01 → SSH **or** `Invoke-Command` to the GP address |
+| Target has no SSH server at all | SSH to SVPDQHQ01 → `Invoke-Command` (WinRM) |
 
 ### Direct SSH to a laptop on the same LAN (verified 2026-08-05, HQNOFRANKP02)
 
