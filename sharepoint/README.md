@@ -38,3 +38,140 @@ curl -s -L -H "Authorization: Bearer $TOKEN" \
 - The **M365 MCP connector** (`mcp__claude_ai_Microsoft_365__read_resource`) can also read file content, but returns a **flattened text rendering** of spreadsheets (loses sheets/columns). Use this app + openpyxl to parse real `.xlsx` structure.
 - `driveId`/`itemId` for a known file: get them from MCP `sharepoint_search` results (the `uri` is `file:///{driveId}/{itemId}`).
 - App-only = no user context; it can read any site. Audit via the app's sign-in logs if needed.
+
+---
+
+## OneDrive / SharePoint admin operations (learned 2026-08-07)
+
+From a OneDrive restore + tenant-wide site-collection-admin cleanup. `Sites.Read.All`
+is **not** enough for most of this — see the permission notes at the end.
+
+### Recycle bin: use `/_api/site/`, NOT `/_api/web/`
+
+On a **personal (OneDrive) site**, `/_api/web/RecycleBin` returns `200` with **zero
+items** even when the bin holds thousands. `$filter=ItemState eq 1|2` also returns 0.
+This looks exactly like an empty recycle bin and led to a wrong "nothing to restore"
+conclusion.
+
+```bash
+GET {site}/_api/web/RecycleBin        # 200, 0 items — LIES on personal sites
+GET {site}/_api/site/RecycleBin       # correct; needs Sites.FullControl.All (403 otherwise)
+```
+
+- No `nextLink` / `$skiptoken` paging — page by **raising `$top`** until the returned
+  count is less than the requested size (`$top=20000` returned all 18,215).
+- Useful fields only: `Id, LeafName, DirName, DirNamePath, ItemType (1=file, 5=folder),
+  ItemState (1=first-stage, 2=second-stage), Size, AuthorName, DeletedByName, DeletedDate`.
+  **No original modified date / version info** is exposed while an item sits in the bin.
+- Restore: `POST {site}/_api/site/recyclebin('{id}')/restore()` → `200 {"odata.null":true}`.
+  Restoring **preserves original Created/Modified/author and version history** — it is an
+  undelete of the same item.
+
+### Graph `copy` destroys metadata; recycle-bin restore preserves it
+
+Cross-drive **move is not supported** by Graph (`PATCH parentReference` is same-drive
+only), so a "move" is copy + delete. But `driveItem: copy` creates a **new** item:
+created/modified stamp to *now* and the author becomes the app (`SharePoint App`).
+`includeAllVersionHistory: true` keeps versions but **not** provenance metadata.
+
+If the originals are still in the source recycle bin, restoring them is far better
+than copying. Sequence that works (order matters):
+
+1. delete the copied **files**
+2. delete the now-empty **folders**, deepest-first
+3. restore original **folders**, shallowest-first
+4. restore original **files**
+
+Make it idempotent by author: only delete items whose `createdBy` is `SharePoint App`,
+and only restore bin entries whose `DeletedByName` is the human who did the move. That
+way a re-run can never eat a restored original or resurrect your own deleted copy.
+
+### Litigation hold blocks deleting NON-EMPTY folders
+
+```
+403 accessDenied — "Request was cancelled by event received. If attempting to
+delete a non-empty folder, it's possible that it's on hold"
+```
+
+Files delete fine; **empty** folders delete fine (`204`). Only non-empty folders are
+refused. Hence the empty-then-delete ordering above.
+
+### Site lock state — read/write via CSOM against the -admin site
+
+Graph does not expose `LockState`. `Set-SPOSite -LockState` is CSOM under the hood and
+can be driven directly with `Sites.FullControl.All` — no PowerShell needed:
+
+```
+POST https://{tenant}-admin.sharepoint.com/_vti_bin/client.svc/ProcessQuery
+Content-Type: text/xml
+Tenant TypeId: {268004ae-ef6b-4e9b-8425-127220d84719}
+  GetSitePropertiesByUrl(url, false) → Query LockState / Status / StorageUsage / Owner
+  SetProperty LockState = "Unlock" | "ReadOnly" | "NoAccess", then Method Update
+```
+
+Takes effect in seconds. A `ReadOnly` site rejects **every** write, including site
+collection admin changes, with the misleading
+`"You need to be a site collection administrator to set this property."` — that is a
+lock, not a permissions problem. Check `LockState` before diagnosing permissions.
+
+### `423 notAllowed` is NOT a site lock
+
+38 OneDrives returned `403` to SharePoint REST and `423 notAllowed — "Access to this
+site has been blocked"` to Graph, while reporting `LockState: Unlock`. These are
+departed-user OneDrives in a retention/pending-deletion state. **`Set-SPOSite
+-LockState Unlock` will not clear it** (an earlier note here claiming otherwise was
+wrong). Cause still unresolved — treat these as un-auditable while the account stays
+deleted.
+
+### Site collection admins over REST
+
+```
+GET  {site}/_api/web/siteusers?$select=Title,Email,LoginName,IsSiteAdmin&$top=500
+POST {site}/_api/web/siteusers(@v)?@v='{urlencoded LoginName}'
+     X-HTTP-Method: MERGE, IF-MATCH: *, odata=verbose
+     body: {"__metadata":{"type":"SP.User"},"IsSiteAdmin":false}
+```
+
+`LoginName` format is `i:0#.f|membership|user@domain` and must be **fully URL-encoded**
+(the `#` and `|` both matter). Removing admin leaves the person as a site *user* — that
+is expected, and is how you re-add them.
+
+Enumerate every OneDrive with search from the **-my** host:
+
+```
+GET {tenant}-my.sharepoint.com/_api/search/query
+    ?querytext='contentclass:STS_Site AND SiteTemplate:SPSPERS'
+    &trimduplicates=false&rowlimit=500&selectproperties='Path,Title'
+```
+
+### People picker filters on accountEnabled, NOT licensing
+
+`ClientPeoplePickerSearchUser` returns **nothing** for a disabled account, even a
+licensed one — so admin dialogs show *"No exact match was found … This entry is not
+found"* and refuse to save. Tested every combination:
+
+| accountEnabled | licensed | resolves |
+|---|---|---|
+| true  | yes | ✅ |
+| true  | **no**  | ✅ |
+| false | yes | ❌ |
+| false | no  | ❌ |
+
+So **assigning a licence does not help**; only re-enabling does. For a directory-synced
+user that means `Enable-ADAccount` on-prem + delta sync (resolved within ~1 min, no UPA
+lag observed). Better still, avoid the picker: REST/CSOM does not use it. A **deleted**
+account can never be resolved and will break the dialog permanently — clear the entry
+via REST.
+
+### Permissions actually required (app-only, direct appRoleAssignment)
+
+| Task | Needs |
+|---|---|
+| Read site users / admins | `Sites.Read.All` (SharePoint) |
+| Read `/_api/site/RecycleBin`, restore, set LockState | **`Sites.FullControl.All`** (SharePoint) |
+| Read/write drive items | `Files.ReadWrite.All` (Graph) |
+
+`Sites.Manage.All` is **not** sufficient for the site-collection recycle bin — still 403.
+Grant these as **direct `appRoleAssignment`s** on the `claude-m365` SP; never use admin
+consent on that app (it reconciles to an incomplete manifest and strips
+`Exchange.ManageAsApp` + Graph roles). Role propagation into a new token takes ~30 s.

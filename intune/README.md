@@ -257,3 +257,53 @@ payload = {
   }]
 }
 ```
+
+---
+
+## `igraph` serves STALE reads for minutes after a write (learned 2026-08-07)
+
+Graph read replicas are eventually consistent. After a successful write, an immediate
+`igraph` GET can keep returning the **pre-write** state for several minutes — long
+enough to look like the write silently failed.
+
+Observed on licence assignment: a Copilot licence was added via `assignLicense`
+(HTTP 200, user object returned), but four consecutive `igraph /users/{id}` reads still
+showed the old licence list. `az rest` against the same endpoint showed the new state
+immediately, and the tenant `subscribedSkus` consumed count had already incremented.
+The write had worked all along.
+
+**Do not confirm a Graph write with an immediate `igraph` re-read.** Use one of:
+
+- `az rest --method GET --url "https://graph.microsoft.com/v1.0/..."` (different token/path)
+- a **counter** rather than the object — e.g. `subscribedSkus[].consumedUnits`, which
+  also lagged a few seconds but settled quickly and unambiguously
+- poll the same read 3+ times a few seconds apart before concluding anything
+
+Same class of problem as the EXO permission-write lag documented in
+`api/exchange/README.md` — treat "wrote OK but reads unchanged" as propagation until
+proven otherwise.
+
+### Licence management via `claude-m365`
+
+Least-privileged app permission for `POST /users/{id}/assignLicense` is
+**`LicenseAssignment.ReadWrite.All`** (`5facf0c1-8979-4e95-abcf-ff3d079771c0`), not
+`Directory.ReadWrite.All` / `User.ReadWrite.All`. Add it as a direct
+`appRoleAssignment` — never admin-consent `claude-m365`.
+
+```bash
+igraph POST "/users/{id}/assignLicense" '{"addLicenses":[],"removeLicenses":["{skuId}"]}'
+igraph POST "/users/{id}/assignLicense" '{"addLicenses":[{"skuId":"...","disabledPlans":[]}],"removeLicenses":[]}'
+```
+
+A body with both arrays empty returns `Request_BadRequest — "No license changes
+provided"`. That is a useful **authorization smoke test**: `Request_BadRequest` means
+the role is working, `Authorization_RequestDenied` means it is not.
+
+### Looking a user up by mail address will lie to you
+
+`GET /users/{mail}` returns `Request_ResourceNotFound` when the account's **UPN suffix
+differs from its mail suffix** — which reads as "account deleted". Seen with
+`svc-scribe-prd`: UPN `@cpp-db.com`, mail `@themyersbriggs.com`. Confirm against AD or
+`$filter=startswith(displayName,'…')` before concluding an account is gone, and check
+`/directory/deletedItems/microsoft.graph.user` for genuinely soft-deleted objects
+(their UPN is prefixed with a GUID).

@@ -228,3 +228,92 @@ $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
 - **`Invoke-Command -Session $s -ScriptBlock {…}` against the Exchange endpoint fails** with `The syntax is not supported by this runspace … ScriptsNotAllowed`. The Exchange PowerShell endpoint is a constrained (NoLanguage) runspace, so it rejects script blocks containing language constructs (`Write-Output`, `Where-Object {…}`, variables). Use **`Import-PSSession`** instead — the generated proxy functions run language constructs locally and marshal only the cmdlet calls to the remote runspace.
 - **`Add-ADPermission -Identity` does not resolve a primary SMTP address:** it's an AD-level cmdlet, not a recipient cmdlet, so `-Identity 'dev@themyersbriggs.com'` fails with "wasn't found." Recipient cmdlets (`Get/Set-DistributionGroup`) accept the SMTP address, but `Add-ADPermission`/`Get-ADPermission` need the **DistinguishedName** (or Name / `DOMAIN\sam`). Fetch it first: `$dn = (Get-DistributionGroup -Identity <smtp>).DistinguishedName`, then `Add-ADPermission -Identity $dn -User 'CPP-DB\fperez' -ExtendedRights 'Send As'`.
 - **Granting delegates on a synced DL end-to-end:** set `GrantSendOnBehalfTo` (Send on Behalf) with `Set-DistributionGroup` and `Send As` with `Add-ADPermission` on-prem, then trigger a **full** AAD Connect sync (`Start-ADSyncSyncCycle -PolicyType Initial` on SVAZADSYNCDC01) — delta does not propagate `publicDelegates`. Do NOT try to set these in the EXO/M365 admin console for a synced DL; it renders the editor but the write fails with "Failed to update delegates at this moment."
+
+---
+
+## EXO admin REST (`InvokeCommand`) — permission auditing gotchas
+
+Learned 2026-08-07 during a tenant-wide FullAccess / SendAs / SendOnBehalf audit
+(265 mailboxes). All four of these cost real time; check them before trusting any
+permission scan.
+
+### 1. Boolean fields come back as STRINGS — `"False"` is truthy in Python
+
+`Get-MailboxPermission` returns `Deny` as the **string** `"False"`, not a bool.
+(`IsInherited` *is* a real bool — the shapes are inconsistent within the same object.)
+
+```python
+if p.get('Deny'): continue          # WRONG — "False" is truthy, drops every row
+def truthy(x): return str(x).strip().lower() in ('true','1')
+if truthy(p.get('Deny')): continue  # right
+```
+
+This produced a confident **"0 FullAccess grants tenant-wide"** result. The real
+number was 330. Any filter over EXO REST output must coerce with `truthy()`.
+
+### 2. Permission writes lag reads by 20 s to several minutes
+
+`Remove-MailboxPermission`, `Add-RecipientPermission` and `Add-MailboxPermission`
+all return `200` with an empty body **immediately**, but `Get-MailboxPermission` /
+`Get-RecipientPermission` keep serving the old ACL for a while.
+
+Verifying too early looks exactly like a silent failure. Two dead-end hypotheses
+were chased (on-prem sync overwrite, `IsDirSynced` differences) before timing it:
+the ACE cleared at **+20 s**. Always converge instead of single-shot verifying:
+
+```python
+for rnd in range(5):
+    pending = scan_for_remaining()
+    if not pending: break
+    apply(pending)
+    time.sleep(150)          # 120 s was still too short in places
+```
+
+Observed convergence: 25 → 9 → 2 → 0 over four rounds.
+
+### 3. `GrantSendOnBehalfTo` returns DISPLAY NAMES, not addresses
+
+`Get-Mailbox` returns `GrantSendOnBehalfTo` as `['Audrey Lafolie', 'thuy tran']`.
+Comparing those against email local parts marks every existing grant as "missing" —
+this inflated a real gap of 124 into a reported 249.
+
+Resolve both sides through `Get-Recipient` (cache it) and compare on
+`PrimarySmtpAddress` before computing any diff.
+
+### 4. `Set-Mailbox -GrantSendOnBehalfTo` rejects duplicate identities
+
+There is no add-semantics over REST, so you must write the **whole list**. If that
+list contains both a display name and the SMTP address for the same person, the
+cmdlet fails:
+
+```
+BadRequest — The parameter "GrantSendOnBehalfTo" contains the following
+duplicated recipient identity: "Sathyan Varadaraj".
+```
+
+22 of 68 mailboxes failed this way. Fix: resolve every existing + new entry to
+`PrimarySmtpAddress`, `set()`-dedupe, then write. Entries that fail to resolve
+(orphaned/deleted trustees) must be dropped, not passed through.
+
+### 5. Filter out self-grants and unresolved SIDs
+
+Mailboxes routinely list their **own owner** in `FullAccess` (`alafolie <- alafolie`).
+Exclude `canon(grantee) == canon(mailbox)` or you will "fix" meaningless grants.
+Deleted trustees persist as raw SIDs (`S-1-5-21-…`) in `Get-RecipientPermission`
+output — they resolve to nothing and should be reported, not written back.
+
+### Working cmdlet shapes (REST `InvokeCommand`)
+
+```python
+invoke("Get-MailboxPermission",   {"Identity": mb})
+invoke("Get-RecipientPermission", {"Identity": mb})          # SendAs lives here
+invoke("Remove-MailboxPermission",{"Identity": mb, "User": u,
+                                   "AccessRights": ["FullAccess"], "Confirm": False})
+invoke("Add-RecipientPermission", {"Identity": mb, "Trustee": u,
+                                   "AccessRights": ["SendAs"], "Confirm": False})
+invoke("Set-Mailbox",             {"Identity": mb, "GrantSendOnBehalfTo": [smtp, ...]})
+invoke("Get-Recipient",           {"ResultSize": "Unlimited"})   # build identity index
+```
+
+Note `Remove-MailboxPermission` needs `-Deny` to remove Deny ACEs (see memory
+`feedback-exchange-deny-ace`); a scan that filters Deny out never surfaces them.
