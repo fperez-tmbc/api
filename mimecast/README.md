@@ -1099,11 +1099,27 @@ The engine's own logs on the host are the only real diagnostic surface; see
 > There is no third DN shape to try. Mimecast's directory holds exactly two trees — `cpp-db <- com`
 > (1159 folders) and `onmicrosoft <- com` (1092) — and exactly two copies of the group, both tested.
 >
-> **This is a defect in Mimecast's O365 path, not a misconfiguration.** At bind time their own
-> `ExchangeAccessValidator.ValidatePowershellConnection` runs a `Get-Recipient` probe that *passes*,
-> so the OAuth, endpoint and service account are sound. The resolver is the only broken part.
-> Reportable in one sentence: *the Office 365 DL resolver composes `<CN>@<DC parts>`; Exchange Online
+> **Prerequisites verified met — the failure is not permissions.** Mimecast document MSE against
+> Office 365 as a supported configuration requiring a mailbox-enabled service account with access to
+> the target mailboxes. `svcmimecasteo` is a `UserMailbox` and holds `Mail Recipients` (which is what
+> grants `Get-Recipient`), `Mail Recipient Creation`, `ApplicationImpersonation` ×3 and
+> `Application EWS.AccessAsApp`. Impersonation is why there are no per-mailbox Full Access entries.
+> Their own bind-time `ExchangeAccessValidator.ValidatePowershellConnection` probe also passes.
+>
+> **Worth ruling out explicitly:** if the resolver's account could not see recipients at all, every
+> identity would return not-found and the "wrong identity string" reading would be wrong. It can see
+> them, so that explanation is eliminated. Note the EXO tests above were run as `claude-m365`, not as
+> `svcmimecasteo` — they prove the identities resolve, not that MSE's account can resolve them; the
+> RBAC check is what closes that gap.
+>
+> ⚠ **The "Mimecast defect" characterisation is an inference from behaviour, NOT confirmed against
+> their documentation.** Every Mimecast KB page 403s to WebFetch and to curl with a browser UA, so
+> only search-result summaries have been read, never the article text. Reportable claim, still to be
+> checked against the docs: *the Office 365 DL resolver composes `<CN>@<DC parts>`; Exchange Online
 > resolves the bare CN (it is the ExternalDirectoryObjectId) but not the composed address.*
+> One lead not yet run down: a search summary of the MSE Troubleshooting Guide attributes "no
+> mailboxes" to a *binding* issue fixed by running MSE on Windows Server 2022+. This host is Server
+> 2025, so that remedy cannot apply, but the underlying passage has never been read.
 >
 > **Verify the group before believing the error.** `directory/find-groups` + `get-group-members`
 > showed `DL Workforce` populated in *both* trees (129 and 128 flattened members, 86–87 users plus
