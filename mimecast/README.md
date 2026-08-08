@@ -1099,6 +1099,62 @@ The engine's own logs on the host are the only real diagnostic surface; see
 > There is no third DN shape to try. Mimecast's directory holds exactly two trees — `cpp-db <- com`
 > (1159 folders) and `onmicrosoft <- com` (1092) — and exactly two copies of the group, both tested.
 >
+> ### ✅ DOCUMENTED FIX — target the group by EMAIL ADDRESS, not by picking it from the tree
+>
+> Read from Mimecast's own KB 2026-08-08. Their *Exchange Tasks* article:
+>
+> > "Configuring Exchange tasks with Active Directory groups, you must target groups using their
+> > **email address** instead of directly using Active Directory Security Groups. You can either:
+> > Create a Dynamic Distribution List, Exchange Distribution List, Mail-Enabled Security Group, or
+> > Microsoft 365 Group in Exchange Online that contains the same users as your original security
+> > group, or use an existing Microsoft 365 Distribution Group, Dynamic Distribution List, or group
+> > email address to resolve group membership. **This version requires targeting groups via their
+> > email address.**"
+>
+> That is exactly why `Get-Recipient` fails — the console's **AD Groups** picker stores a **DN**,
+> and this MSE version expects an **SMTP address**. `DLWorkforce@themyersbriggs.com` resolves.
+>
+> **Their KB is reachable — the web pages 403 bots, the help-center API does not:**
+> ```
+> curl -A "<browser UA>" -H "Accept: application/json" \
+>   "https://mimecastsupport.zendesk.com/api/v2/help_center/en-us/articles/<id>.json"
+> ```
+> Useful ids: `34000357562387` Requirements · `34000327221267` Exchange Tasks ·
+> `34000344997011` Troubleshooting Guide · `34000371850003` Overview. **Do not conclude a Mimecast
+> KB is unreadable because WebFetch and curl-on-the-HTML both 403.**
+>
+> **Supported group types** (Requirements article) — the constraint is the *type*, and only for
+> M365 Standalone:
+>
+> | Group type | M365 Standalone | On-Prem | Hybrid |
+> |---|---|---|---|
+> | AD Security Group | **No** | Yes | Yes |
+> | Exchange Distribution List | Yes | Yes | Yes |
+> | Mail-Enabled Security Group | Yes | Yes | Yes |
+> | Exchange Dynamic Distribution Group | Yes | Yes | Yes |
+>
+> Distribution groups **must not be hidden from the Global Address List**. `DL Workforce` is a
+> `MailUniversalDistributionGroup` with `HiddenFromAddressListsEnabled: False`, so the group itself
+> was always compliant — only the targeting method was wrong.
+>
+> **The Troubleshooting Guide names this exact scenario:** *"when MSE was previously bound to
+> Exchange On-Premise and must be updated to bind to M365… users present in Exchange On-Premise are
+> moved to Exchange Online/M365… the tasks will fail and show there are 'no mailboxes.'"* Its stated
+> remedy is installing MSE on Windows Server 2022 or later; SVAZADSYNCDC01 is Server 2025, so that
+> particular remedy does not apply here.
+>
+> ⚠ **Watch the member count on the first successful run.** Targeted by address, EXO returns only
+> **4 direct members** for this DL (2 user mailboxes, 1 disabled user, 1 nested DL) — the other ~125
+> sit behind the nested `DL All Employees`. If MSE does not expand nesting, a task scoped to
+> `DLWorkforce@themyersbriggs.com` covers 2 mailboxes, not 128. Target a flat group if that is not
+> the intent.
+>
+> **An earlier revision of this file called this a Mimecast defect and said it was not fixable from
+> the console. Both were wrong** — the conclusion was drawn from observed behaviour without reading
+> the vendor documentation, after WebFetch/curl 403s were misread as the docs being inaccessible.
+>
+> ---
+>
 > **Prerequisites verified met — the failure is not permissions.** Mimecast document MSE against
 > Office 365 as a supported configuration requiring a mailbox-enabled service account with access to
 > the target mailboxes. `svcmimecasteo` is a `UserMailbox` and holds `Mail Recipients` (which is what
