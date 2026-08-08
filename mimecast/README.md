@@ -1075,12 +1075,35 @@ The engine's own logs on the host are the only real diagnostic surface; see
 > So on a site bound `host: O365`, the picker offers no group whose DN the Office 365 resolver can
 > consume. **This is not fixable from the console** — it needs Mimecast.
 >
-> The only shape that would work by construction is a DN with **no OUs** whose CN + DC parts compose
-> to the group's real primary SMTP — `CN=DLWorkforce,DC=themyersbriggs,DC=com` →
-> `DLWorkforce@themyersbriggs.com`. The picker cannot produce that and the `Group DN` field is not
-> editable, so it is a diagnosis aid, not a remedy.
->
 > Verified across six scheduled runs 2026-08-06 16:00 → 2026-08-08 08:00, all three task types.
+>
+> **Proven against Exchange Online 2026-08-08** (app-only, module pinned to 3.9.2). The two
+> identities MSE actually sends are precisely the two that fail; everything else about the group is
+> fine:
+>
+> ```
+> NOT FOUND | CN=DL Workforce,OU=Distribution,OU=Groups,OU=TheMBC,DC=cpp-db,DC=com
+> NOT FOUND | 1d7f28c3-5260-4470-81e3-49f9c1bc1320@myersbriggsco.onmicrosoft.com
+> RESOLVED  | 1d7f28c3-5260-4470-81e3-49f9c1bc1320          <- bare GUID, no domain
+> RESOLVED  | DLWorkforce@themyersbriggs.com
+> RESOLVED  | DL Workforce
+> RESOLVED  | CN=DL CPP Workforce,OU=myersbriggsco.onmicrosoft.com,OU=Microsoft Exchange
+>             Hosted Organizations,DC=NAMPR08A005,DC=PROD,DC=OUTLOOK,DC=COM
+> ```
+>
+> **MSE holds the correct identifier and ruins it by appending a domain.** That GUID is the group's
+> `ExternalDirectoryObjectId` in Exchange Online — passed alone it resolves instantly; composed as
+> `<guid>@<tenant>.onmicrosoft.com` it is an address no object owns. Note EXO knows the group as
+> **`DL CPP Workforce`**, not `DL Workforce`; the two directories are not interchangeable.
+>
+> There is no third DN shape to try. Mimecast's directory holds exactly two trees — `cpp-db <- com`
+> (1159 folders) and `onmicrosoft <- com` (1092) — and exactly two copies of the group, both tested.
+>
+> **This is a defect in Mimecast's O365 path, not a misconfiguration.** At bind time their own
+> `ExchangeAccessValidator.ValidatePowershellConnection` runs a `Get-Recipient` probe that *passes*,
+> so the OAuth, endpoint and service account are sound. The resolver is the only broken part.
+> Reportable in one sentence: *the Office 365 DL resolver composes `<CN>@<DC parts>`; Exchange Online
+> resolves the bare CN (it is the ExternalDirectoryObjectId) but not the composed address.*
 >
 > **Verify the group before believing the error.** `directory/find-groups` + `get-group-members`
 > showed `DL Workforce` populated in *both* trees (129 and 128 flattened members, 86–87 users plus
