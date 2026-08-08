@@ -1054,10 +1054,33 @@ The engine's own logs on the host are the only real diagnostic surface; see
 > | `myersbriggsco.onmicrosoft.com` (Azure AD / O365 connector) | `CN=<Entra objectId>,DC=myersbriggsco,DC=onmicrosoft,DC=com` | Office 365 → **fails**, CN is a GUID |
 > | `cpp-db.com → TheMBC → Groups → Distribution` (on-prem AD connector) | `CN=DL Workforce,…,DC=cpp-db,DC=com` | CN is the real group name |
 >
-> TMBC's three tasks are bound to the **Azure AD** copy, so all three have failed every day for at
-> least the full 8-day log retention — zero successes. Fix direction: re-select the group in each
-> definition from the **on-prem AD** tree, then re-run and watch
-> `DirectoryDistributionListResolver` in the log to confirm the identity it builds.
+> ### ⚠ NEITHER TREE WORKS on an O365-bound site. Tested 2026-08-06→08, both fail.
+>
+> All three tasks were re-created against the **on-prem AD** copy. They still fail, and the log
+> shows the resolver does something different with that DN shape:
+>
+> ```
+> getting recipient CN=DL Workforce,OU=Distribution,OU=Groups,OU=TheMBC,DC=cpp-db,DC=com
+> was not resolved
+> ```
+>
+> **MSE passes the whole DN verbatim when the DN contains OU components, and only does the
+> CN + DC → SMTP conversion when it does not.** That is why the two shapes fail differently:
+>
+> | Source tree | DN | Identity MSE sends to `Get-Recipient` | Why it fails |
+> |---|---|---|---|
+> | Azure AD | `CN=<objectId>,DC=myersbriggsco,DC=onmicrosoft,DC=com` | `<objectId>@myersbriggsco.onmicrosoft.com` | composed address; not one of the group's proxy addresses |
+> | on-prem AD | `CN=DL Workforce,OU=Distribution,OU=Groups,OU=TheMBC,DC=cpp-db,DC=com` | the raw DN, unchanged | EXO resolves the *cloud* DN (`…,OU=Microsoft Exchange Hosted Organizations,DC=…PROD.OUTLOOK.COM`), not an on-prem one |
+>
+> So on a site bound `host: O365`, the picker offers no group whose DN the Office 365 resolver can
+> consume. **This is not fixable from the console** — it needs Mimecast.
+>
+> The only shape that would work by construction is a DN with **no OUs** whose CN + DC parts compose
+> to the group's real primary SMTP — `CN=DLWorkforce,DC=themyersbriggs,DC=com` →
+> `DLWorkforce@themyersbriggs.com`. The picker cannot produce that and the `Group DN` field is not
+> editable, so it is a diagnosis aid, not a remedy.
+>
+> Verified across six scheduled runs 2026-08-06 16:00 → 2026-08-08 08:00, all three task types.
 >
 > **Verify the group before believing the error.** `directory/find-groups` + `get-group-members`
 > showed `DL Workforce` populated in *both* trees (129 and 128 flattened members, 86–87 users plus
