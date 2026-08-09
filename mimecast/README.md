@@ -1099,7 +1099,38 @@ The engine's own logs on the host are the only real diagnostic surface; see
 > There is no third DN shape to try. Mimecast's directory holds exactly two trees — `cpp-db <- com`
 > (1159 folders) and `onmicrosoft <- com` (1092) — and exactly two copies of the group, both tested.
 >
-> ### ✅ DOCUMENTED FIX — target the group by EMAIL ADDRESS, not by picking it from the tree
+> ### ✅ RESOLVED 2026-08-08 — the email-address target works, and MSE DOES expand nested groups
+>
+> `MDS-21365` ran at 16:00 PDT and completed green. The resolution chain in the log:
+>
+> ```
+> executing task MDS-21365 dl: [DLWorkforce@themyersbriggs.com]
+> DirectoryDistributionListResolver | Resolving name with Office 365
+> PowershellController | getting recipient DLWorkforce@themyersbriggs.com
+> PowershellController | getting members for recipient CN=DL CPP Workforce,OU=myersbriggsco.onmicrosoft.com,
+>                        OU=Microsoft Exchange Hosted Organizations,DC=NAMPR08A005,DC=PROD,DC=OUTLOOK,DC=COM
+> PowershellController | getting recipient DL All Employees
+> PowershellController | getting members for recipient CN=DL All Employees,OU=myersbriggsco...
+> PowershellController | getting recipient _EU UK All Staff / DL AsiaPac Employees /
+>                        _European Offices / DL US Employees   … and their members
+> ```
+>
+> MSE resolves the address to the **cloud** DN itself and then recurses the nested groups.
+> **87 distinct mailboxes** across 2,785 log lines, ~5 minutes — matching the ~86–87 users Mimecast's
+> own directory reports for that group.
+>
+> **An earlier revision of this file warned the task might cover only 2 mailboxes because the DL has
+> just 4 direct members. That was wrong — MSE expands nesting.** Don't repeat the caveat.
+>
+> One benign `WARN`: `recipient with identifier 136a421f-… not found` = **Luke Berry**
+> (`lberry@themyersbriggs.com`), disabled and unlicensed, so no mailbox exists to resolve. Stale DL
+> membership, not a failure; the task still completed green.
+>
+> ⚠ **The Mimecast console displays EDT, the MSE host runs Pacific — a 3-hour offset.** The 16:00 PDT
+> run shows as `Last Active 08 Aug, 19:05 pm` in the console. Convert before comparing console times
+> to engine-log timestamps (which are host-local and `DDMMYYYY`).
+>
+> ### The fix — target the group by EMAIL ADDRESS, not by picking it from the tree
 >
 > Read from Mimecast's own KB 2026-08-08. Their *Exchange Tasks* article:
 >
