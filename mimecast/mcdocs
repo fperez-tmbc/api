@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+"""
+mcdocs — read Mimecast's public knowledge base from the terminal.
+
+The KB web pages (mimecastsupport.zendesk.com/hc/...) return HTTP 403 to automated
+fetchers. That is a bot block, NOT authentication — the pages are public. The Zendesk
+help-center API serves the same articles with no credentials and no special headers.
+
+Usage:
+  mcdocs search "synchronization engine requirements"     find articles (title-ish terms work best)
+  mcdocs get 34000357562387                               print an article as plain text
+  mcdocs get https://mimecastsupport.zendesk.com/hc/en-us/articles/34000357562387-...
+
+Gotcha: search must NOT include the locale segment, fetch MUST include it.
+  search -> /api/v2/help_center/articles/search.json
+  fetch  -> /api/v2/help_center/en-us/articles/<id>.json
+"""
+
+import html
+import json
+import re
+import sys
+import urllib.parse
+import urllib.request
+
+HOST = "https://mimecastsupport.zendesk.com"
+
+
+def _get(url):
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=45) as r:
+        return json.load(r)
+
+
+def search(query, limit=10):
+    url = f"{HOST}/api/v2/help_center/articles/search.json?" + urllib.parse.urlencode(
+        {"query": query, "per_page": limit}
+    )
+    for a in _get(url).get("results", [])[:limit]:
+        print(f"{a['id']}  {a['title']}")
+
+
+def to_text(body):
+    body = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", body, flags=re.S | re.I)
+    body = re.sub(r"<br\s*/?>|</p>|</li>|</tr>|</h[1-6]>", "\n", body, flags=re.I)
+    body = re.sub(r"</t[dh]>", " | ", body, flags=re.I)
+    body = re.sub(r"<[^>]+>", "", body)
+    return re.sub(r"\n{3,}", "\n\n", html.unescape(body))
+
+
+def get(ident):
+    m = re.search(r"(\d{6,})", ident)
+    if not m:
+        sys.exit(f"could not find an article id in: {ident}")
+    art = _get(f"{HOST}/api/v2/help_center/en-us/articles/{m.group(1)}.json").get("article", {})
+    print(f"# {art.get('title','')}\n{art.get('html_url','')}\n")
+    print(to_text(art.get("body", "") or ""))
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 3 or sys.argv[1] not in ("search", "get"):
+        sys.exit(__doc__)
+    (search if sys.argv[1] == "search" else get)(" ".join(sys.argv[2:]))

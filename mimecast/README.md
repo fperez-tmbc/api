@@ -1,5 +1,36 @@
 # Mimecast API Notes
 
+## Reading the Mimecast KB — `mcdocs`, not the web pages
+
+The KB web pages (`mimecastsupport.zendesk.com/hc/...`) return **HTTP 403 to WebFetch and to curl**,
+including with a full browser user-agent. **That is a bot block, not authentication** — the articles
+are public and need no credentials at all.
+
+`./mcdocs` in this directory reads them:
+
+```zsh
+./mcdocs search "synchronization engine exchange tasks"   # -> id  title
+./mcdocs get 34000327221267                               # -> article as plain text
+./mcdocs get "https://mimecastsupport.zendesk.com/hc/en-us/articles/34000357562387-..."
+```
+
+Raw endpoints. **The locale segment is required on fetch and breaks search** — that asymmetry is the
+only real trap:
+
+```
+search   /api/v2/help_center/articles/search.json?query=...        (NO locale)
+fetch    /api/v2/help_center/en-us/articles/<id>.json              (locale REQUIRED)
+```
+
+No headers are needed beyond `Accept: application/json`; the browser UA turned out to be irrelevant.
+Article ids are the leading number in any KB URL. Search relevance is weak on symptom phrases and
+good on title-like terms — search for the *article you want*, not the error you saw.
+
+**Read the docs before theorising.** In August 2026 an MSE failure was diagnosed from engine logs and
+Exchange Online probes, written up as an unfixable vendor defect, and used to recommend migrating to
+a separately-licensed product. The vendor documented the one-line fix all along. The 403s were read
+as "the docs are inaccessible" and then, wrongly, as "they need Frank's login."
+
 ## API 2.0 Setup
 
 - **App name:** tmbc-admin-api (created via Integrations → API and Platform Integrations → old UI)

@@ -28,6 +28,34 @@ curl -s -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 
 Many sites expose clean data endpoints that bypass JS rendering entirely.
 
+### Vendor knowledge bases on Zendesk — a 403 is a bot block, not a paywall
+
+Zendesk-hosted help centres (`<vendor>.zendesk.com/hc/...`) commonly 403 both WebFetch and curl **even
+with a full browser UA**, while the identical articles are public and free over the help-center API.
+Verified against Mimecast 2026-08-08; the pattern is Zendesk's, so it applies to any vendor on it.
+
+```bash
+# find articles — NOTE: no locale segment, or it returns nothing
+curl -s -H "Accept: application/json" -G \
+  --data-urlencode "query=synchronization engine requirements" --data-urlencode "per_page=5" \
+  "https://<vendor>.zendesk.com/api/v2/help_center/articles/search.json"
+
+# fetch one — NOTE: locale segment IS required here
+curl -s -H "Accept: application/json" \
+  "https://<vendor>.zendesk.com/api/v2/help_center/en-us/articles/<id>.json"
+```
+
+- The article **id is the leading number in any KB URL**.
+- No auth, no cookies, **and no User-Agent header needed** — unlike the HTML pages.
+- Body comes back as HTML in `.article.body`; strip tags for reading.
+- Search relevance is weak on error-message phrases, good on title-like terms. Alternative that
+  always works: use a normal web search to find the article URL, then fetch by its id.
+- Worked example / ready-made reader: `api/mimecast/mcdocs`.
+
+**Do not conclude a vendor's documentation is unreadable, or that it requires the user's login,
+because a fetch returned 403.** Check for an API first — saying "you'll have to read this one
+yourself" on a public page pushes work back onto Frank on a false premise.
+
 ### Reddit
 
 Append `.json` to any post URL to get the full post + all comments as JSON:
