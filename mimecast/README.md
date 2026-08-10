@@ -66,7 +66,66 @@ as "the docs are inaccessible" and then, wrongly, as "they need Frank's login."
 - Web Security
 - TTP URL Protect managed URLs
 
+> ## 🔑 THERE IS A SECOND URL FAMILY, AND IT IS NOT UNDER `/api/`
+>
+> Discovered 2026-08-10 after a whole session of wrong conclusions. Mimecast's newer REST routes sit
+> at the **host root**, not under `/api/`. Every `/api/...` guess for these returns
+> `403 app_forbidden` — *"Resource or method requested does not exist in any product assigned"* —
+> which reads exactly like a permission problem and is not one. **`app_forbidden` frequently means
+> "you spelled the path wrong", not "you lack rights".**
+>
+> Verified working on `https://us-api.services.mimecast.com` with the ordinary `tmbc-admin-api`
+> bearer token:
+>
+> | Route | Method | Result |
+> |---|---|---|
+> | `/policy-management/cloud-gateway/v1/blocked-senders/policies` | GET | ✅ 200 — full policy objects |
+> | `/directory/cloud-gateway/v1/groups` | GET | ✅ 200 — groups with **UUID** ids |
+> | `/config-snapshot/v1/list` | POST | ✅ 200 — needs `{"data":[{"backupType": ...}]}` |
+> | `/config-snapshot/v1/create` | POST | ✅ 200 — needs `backupType` **and** `name` |
+> | `/config-snapshot/v1/export` | POST | reachable; needs `exportSource`, exact schema **not yet solved** (`err_config_snapshot_export_snapshot_failed` on snapshot/live/current) |
+> | same paths **with** `/api/` prefix | — | ❌ 403 / 404 |
+>
+> **Valid `backupType` values** (probed exhaustively): `managedsenders`, `profilegroups`,
+> `managedurls`. Anything else → `err_config_snapshot_invalid_backup_type`. Note they are
+> **single words, no underscores** — `managed_senders` is rejected.
+>
+> Per Mimecast's *Blocked Senders Policy Management and User Group Endpoints* (KB `41899112734355`,
+> June 2025) the blocked-senders route supports **GETALL / GET / CREATE / UPDATE / DELETE**, and the
+> directory route supports **CREATE Profile Group**. Only GETALL is verified here; the write verbs
+> are documented but untested.
+>
+> **This means "Managed Senders cannot be read via API" was wrong** — there is no direct list
+> endpoint, but `config-snapshot` explicitly covers Managed Senders, Managed URLs and Profile Groups
+> (KB `34000395920019`). Read is via snapshot+export, not a GET.
+>
+> Note the id formats differ between families: `/api/directory/*` returns ~250-char base64 blobs,
+> `/directory/cloud-gateway/v1/*` returns plain UUIDs. **They are not interchangeable.**
+>
+> **Discovery method that worked, when guessing paths did not:** search the KB for the *feature*
+> (`./mcdocs search "blocked senders API"`), then pull the article JSON and extract `href=` links —
+> the release-note articles link straight to `developer.services.mimecast.com/docs/<product>/1/routes/<path>`,
+> and the route segment of that URL **is** the live API path. The developer portal itself is a JS
+> shell (every URL returns the same 2,138-byte app skeleton), so scraping it directly is useless.
+
+### Blocked Senders policies — what is actually wired up (2026-08-10)
+
+`GET /policy-management/cloud-gateway/v1/blocked-senders/policies` → 4 policies:
+
+| Description | option | fromPart | from → to | enabled |
+|---|---|---|---|---|
+| Default External to External Blocked Senders Policy | `block_sender` | `envelope_from` | external → external | ✅ |
+| **Default Blocked Senders to Everyone Policy** | `block_sender` | **`both`** | **profile_group `Blocked Senders`** → everyone | ✅ |
+| IP Based Block | `block_sender` | `both` | everyone → everyone | ❌ (`override=True`) |
+| Allow Relay | `no_action` | `both` | everyone → profile_group `Relay` | ✅ |
+
+**The `Blocked Senders` profile group IS load-bearing** — consumed tenant-wide on both envelope and
+header. This settles a question that was open all session while the group was being curated.
+
 ### NOT available via API — console only
+> ⚠ **Re-verify anything in this list against the root-level URL family above before believing it.**
+> Several entries here were written from `/api/`-only probing and may simply be the wrong path.
+
 - **Permitted Senders policies.** Only *Blocked* Senders is exposed. Every permitted-sender path
   (`policy/permitted-sender/get-policy`, `policy/permittedsender/...`, `policy/permittedsenders/...`)
   returns `app_forbidden` — *"Resource or method requested does not exist in any product assigned to
@@ -97,16 +156,33 @@ as "the docs are inaccessible" and then, wrongly, as "they need Frank's login."
 
   ⚠ **An inbound `dkim=none` proves nothing about outbound signing** — Mimecast signs on egress only.
   Judge from an externally-received copy, never from an archived inbound leg.
-- **Group membership WRITES — confirmed blocked on `Blocked Senders` too, 2026-08-10.** Not just
-  Permitted Senders. `directory/remove-group-member` with `{id: <groupId>, emailAddress: ...}` **and**
-  with `{id, domain: ...}` both return HTTP 403 `err_xdk_operation_forbidden_for_address`. The payload
-  shape is right — `folderId` instead of `id` fails schema validation with `err_validation_null` on
-  `id`, proving `id` is the correct field and the 403 is authorization, not syntax. **Reads work,
-  writes don't. Curating these groups is console-only.**
-  Practical console path: `Users & Groups | Profile Groups | <group>`, use the **Search** box then
-  **Clear Selected Links** — searching a domain fragment clears all its entries at once.
-  Always `directory/get-group-members` to JSON first as a backup; the per-entry `notes` are years of
-  incident context and cannot be reconstructed once deleted.
+- **~~Group membership WRITES blocked~~ — RESOLVED 2026-08-10, it was a missing ROLE PERMISSION.**
+  `directory/remove-group-member` returned `403 err_xdk_operation_forbidden_for_address` until
+  **`Directories | Groups | Edit`** was added to the custom `Claude` role. After that the identical
+  call returns HTTP 200 and the member count decrements. Verified end-to-end on the `Blocked Senders`
+  group.
+  - Payload: `{"data":[{"id": <groupId>, "emailAddress": ...}]}` or `{"id", "domain"}`. Members carry
+    **no per-member id** — `emailAddress`/`domain` is the only identifier. `folderId` instead of `id`
+    fails with `err_validation_null`, which is how you tell a schema error from an auth error.
+  - **`err_xdk_operation_forbidden_for_address` = role permission missing.**
+    **`app_forbidden` = wrong path or product.** Two different failures, easy to conflate.
+  - Adding the permission does **not** require regenerating credentials; the role is bound to the app
+    via its *Application Role* field, so `~/GitHub/.tokens/mimecast` stays valid.
+  - Still snapshot `directory/get-group-members` to JSON before bulk edits — the per-entry `notes`
+    are years of incident context and cannot be reconstructed once deleted.
+  - Console path if preferred: `Users & Groups | Profile Groups | <group>` → **Search** box →
+    **Clear Selected Links** (clears every match at once).
+
+- **Managed Senders — create works, there is no direct read or delete.**
+  `POST /api/managedsender/permit-or-block-sender` with
+  `{"data":[{"action":"permit|block","sender": ...,"to": ...}]}` returns 200 and creates the entry
+  (verified 2026-08-10). Requires **`Gateway | Managed Senders | Edit`** on the role.
+  **13 read/delete path variants were probed and all 403 — including under Super Administrator**, so
+  that is a product limitation, not permissions. Reading is via `config-snapshot` (`backupType:
+  managedsenders`) instead. **Treat creation as a one-way door: you cannot list or reverse it by API.**
+  ⚠ Managed Senders (sender **+ recipient** pairs) is a completely different object from the
+  **`Permitted senders` / `Blocked Senders` profile groups** (directory groups consumed by policies).
+  The console names invite conflating them; the APIs are unrelated.
 - **Group membership WRITES.** `directory/add-group-member` and `directory/remove-group-member` both
   exist and pass schema validation, but every call against the `Permitted senders` group fails with
   `err_xdk_operation_forbidden_for_address` — *"0003 Forbidden To Perform Operation For Address"*.
