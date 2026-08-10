@@ -763,18 +763,42 @@ Vendor source: KB `34000468841107` (*DNS Authentication Overview*, recommended t
 four option *names* are bolded there as labels, so derive that one from the Overview table, not the
 bold runs.
 
-**Mimecast's recommended inbound baseline, and our state as audited 2026-08-10** (Default Inbound
-DNS Authentication Definition). Ours matched on **2 of 14**:
+**CHANGED 2026-08-10.** The Default Inbound DNS Authentication Definition previously matched the
+vendor baseline on only **2 of 14** settings (ten were `Take No Action`, SPF Hard Fail and DMARC Fail
+were `Ignore Managed/Permitted`). It is now:
 
-| Check | Result | Recommended | Ours (2026-08-10) |
+| Check | Result | Current setting | Vendor rec |
 |---|---|---|---|
-| SPF | None / Neutral / PermError / TempError | Ignore Managed/Permitted Sender Entries | Take No Action ✗ |
-| SPF | Soft Fail | Ignore Managed/Permitted Sender Entries | ✅ match |
-| **SPF** | **Hard Fail** | **Reject** | Ignore Managed/Permitted ✗ |
-| DKIM | None / PermError / TempError | Ignore Managed/Permitted Sender Entries | Take No Action ✗ |
-| DKIM | Fail | Ignore Managed/Permitted Sender Entries | ✅ match |
-| DMARC | None / PermError / TempError | Ignore Managed/Permitted Sender Entries | Take No Action ✗ |
-| **DMARC** | **Fail** | **Honor DMARC Record** | Ignore Managed/Permitted ✗ |
+| SPF | None / Neutral / Soft Fail / **Hard Fail** / PermError / TempError | Ignore Managed/Permitted Sender Entries | same, except Hard Fail where vendor says **Reject** |
+| DKIM | None / Fail / PermError / TempError | Ignore Managed/Permitted Sender Entries | ✅ same |
+| DMARC | None / PermError / TempError | Ignore Managed/Permitted Sender Entries | ✅ same |
+| **DMARC** | **Fail** | **Honor DMARC Record** | ✅ same |
+| — | Enable Notifications | **OFF** (deliberate — see below) | vendor defaults ON |
+
+**Deliberate departure #1 — SPF Hard Fail stays `Ignore`, not `Reject`.** SPF breaks on forwarding by
+design, and a per-check `Reject` fires *before* DMARC can rescue the message on DKIM alignment. Under
+this config a hard-failing domain that publishes DMARC still gets rejected — via `Honor DMARC Record`,
+i.e. because its own policy asked for it. Only hard-fail from domains with **no** DMARC record is
+softened to spam-scanning. Net effect: **nothing is rejected unless the sending domain asked for it.**
+
+**Deliberate departure #2 — notifications OFF.** Frank, 2026-08-10: *"I don't want to be notified of
+DMARC rejections/quarantines... Holds will be reported via the digest emails."* The only two options
+are `Administrator Group` and `Internal Recipient`, both per-message emails. Approach is to monitor
+the held queue instead.
+
+> ⚠ **Unverified caveat on the digest assumption.** `Configuring Digest Set Emails` (KB
+> `34000742702739`) lists only **Spam Scanning, Attachment Management, Content Examination and
+> Impersonation Protect** as digest-eligible policies — **DNS Authentication is not among them** —
+> while `Held Messages - Monitoring` (KB `34000774230547`) *does* list DNS Authentication as a policy
+> that holds messages. So DMARC holds reach the held queue but may **not** reach end-user digests.
+> Confirm by opening the Digest Set definition and checking whether DNS Authentication is offered.
+> Only `p=quarantine` senders are affected; `p=reject` is refused at SMTP so the sender gets a bounce.
+
+**Monitoring the effect — `gateway/get-hold-message-list` is readable via API** (unlike the policy
+config). Baseline taken immediately post-change 2026-08-10: **8,879 held total**; page 1 of 500 was
+497 `Message Hold Applied - Spam Signature policy`, 3 `Message Hold Applied - Multi Vector Protection
+Policy`, **0 DNS Authentication**. Watch for a new `reason` string to appear. Mind the pagination
+warning above — a clean page 1 is not a clean queue.
 
 > ### ⚠ `Take No Action` is NOT the neutral option — it lets allow-lists beat authentication
 >
