@@ -107,3 +107,25 @@ Any zone hosted on the DNS server. Frank specifies the zone at request time. Com
 | Server | Hostname | Notes |
 |--------|----------|-------|
 | Primary DC | SVDCDC01.cpp-db.com | Default |
+
+## ⚠ These DCs also serve PUBLIC zones, which breaks public-record audits
+
+Several public zones are **split-horizon** — served publicly by Cloudflare and internally by these
+DCs. From a domain-joined Mac the system resolver answers from the *inside* view, so a public-record
+audit silently reads the wrong zone.
+
+Verified 2026-07-31: `dig +short NS opp.co.uk` returned `mkpdvdmc01.opp.local` /
+`mkpdvdmc02.opp.local`. Probing "the authoritative NS" then reported
+`_dmarc.assessment.opp.co.uk` as absent while Cloudflare plainly had the record.
+`themyersbriggs.co` was unaffected — its `dig NS` returns Cloudflare — so **the failure is silent
+and per-zone**, and you cannot assume it away.
+
+**How to apply:** for any public DNS question, take the authoritative NS from the Cloudflare zone
+object (`GET /zones?name=<zone>` → `name_servers[]`), never from `dig NS` against the system
+resolver, and cross-check with `@1.1.1.1` / `@8.8.8.8`. Full set of answer-reading traps (wildcard
+occlusion, chunked TXT, DKIM selector enumeration) is in `../cloudflare/README.md` under
+**Reading DNS answers**.
+
+Related: internal reverse zones are **/16-scoped and partial**, so an authoritative NXDOMAIN from
+one domain's DCs is not evidence the record doesn't exist — the 10.x subnets are shared between
+cpp-db.com and opp.local, each hosting only its own records. Query each domain's DNS in turn.

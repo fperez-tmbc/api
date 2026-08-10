@@ -147,6 +147,75 @@ Checklist before removing an SPF mechanism:
 7. Add a **record comment** naming the dependency — the only warning visible at the point of edit.
    Keep it short: 87 chars took, ~230 returned HTTP 400.
 
+## ⚠ Reading DNS answers — four traps that produce confident wrong conclusions
+
+Every DNS error in the 2026-07-31 → 08-10 email-authentication audit came from **misreading an
+answer**, not from a failed call. `dig` is not a source of truth about a zone. The zone dump is.
+
+### 1. Wildcard occlusion — a wildcard stops covering a name the moment that name exists
+
+**RFC 4592: a wildcard is consulted only for names that do not exist.** Any RRset at a name — of
+*any* type — makes that name exist and ends wildcard coverage for it, for **every** record type,
+permanently.
+
+`*.themyersbriggs.co` publishes `v=spf1 -all` (`c74667d64ff0604ee2b8c2853e44f093`). But
+`notifications.themyersbriggs.co` carries Mimecast **MX** records, which make the name exist — so
+the wildcard SPF was never consulted for it. That subdomain had **no SPF at all** and was
+spoofable, while reading as "inherits the wildcard" to everyone who looked. Fixed 2026-07-31 with an
+explicit `v=spf1 -all` (`40ee6e96c6d6c8b8cc006f1950714a61`). Same fix for `assessment.opp.co.uk`
+(`03cfd5324ae096dcc4da150d58436136`), which had no wildcard to inherit in the first place.
+
+Worth remembering on its own: **adding an MX record to a subdomain silently removes its wildcard
+SPF.** Routine action, non-obvious security consequence, no warning from any tool.
+
+### 2. The inverse — an answer that is present but synthesized
+
+Under a wildcarded zone **every undefined name returns a plausible answer**. Probing
+`_mta-sts.themyersbriggs.co` or `_smtp._tls.themyersbriggs.co` returns `v=spf1 -all` off the `*`
+record, which reads as "MTA-STS is configured." It is not.
+
+This is worst for **DKIM selectors, which cannot be enumerated from DNS** — you can only query a
+name you already know, so every wrong guess comes back with content. `opp.com` and `vitanavis.com`
+were both wrongly reported as having no Mimecast DKIM after two guessed selector names missed; the
+real selector was `mimecast20220323` in both. **Enumerate the zone instead** —
+`dns_records?per_page=1000` here, `list-resource-record-sets` on Route 53. A guessed lookup is a
+coin flip; the zone dump is the fact.
+
+**Detect a wildcard before trusting any probe:** query a known-nonexistent control name in the same
+zone. If it answers, every probe in that zone is suspect.
+
+### 3. Chunked TXT records — naive joining corrupts them
+
+Any TXT over 255 characters is split into multiple strings. This produced **four** wrong readings
+during the DKIM audit: a valid 2048-bit key reported as `b64 err`, a correct Route 53 record
+measured at 395 chars instead of 392, Mimecast keys called 1024-bit off a bad length count, and —
+the expensive one — a *genuine defect dismissed as a parser bug*.
+
+- **Cloudflare** stores chunks in `content` as `"aaa" "bbb"`. The `" "` is a **separator, not key
+  material** — strip it before measuring or decoding.
+- **Route 53** stores the same way inside a single `ResourceRecords[].Value`. Extract with
+  `re.findall(r'"([^"]*)"', value)` and join. Never concatenate the raw value.
+
+**When a decode fails, do not decide between "my parser is wrong" and "the record is wrong" by
+reasoning — pull the vendor's source value from their console and diff it.** Three 2021/2022-era
+Mimecast DKIM records (`cpp.com`, `opp.com`, `themyersbriggs.com`) each carried one stray space that
+was absent from the vendor's value. RFC 6376 permits folding whitespace inside `p=` so verifiers
+tolerate it, but it is still a defect; fixed 2026-08-10 by re-PATCHing the whitespace-stripped value
+(identity-preserving — same key, no rotation).
+
+### 4. `dig NS <public zone>` can return INTERNAL nameservers
+
+Split-horizon zones resolve from inside. `dig +short NS opp.co.uk` from a domain-joined Mac returns
+`mkpdvdmc01.opp.local` / `mkpdvdmc02.opp.local`, because `opp.co.uk` is served publicly by Cloudflare
+**and** internally by the opp.local DCs. Probing "the authoritative NS" then reported
+`_dmarc.assessment.opp.co.uk` absent while Cloudflare plainly had it. `themyersbriggs.co` was
+unaffected — its `dig NS` returns Cloudflare — so **the failure is silent and per-zone**.
+
+**Get the authoritative NS from the zone object** (`GET /zones?name=<zone>` → `name_servers[]`),
+never from `dig NS` against the system resolver, and cross-check against `@1.1.1.1` and `@8.8.8.8`.
+When a zone dump and an "authoritative" dig disagree, suspect split-horizon before suspecting the
+data. See `../dns/README.md` for the internal-DNS side of this.
+
 ## Gotchas
 - A Worker with no routes and no custom domains is unlinked and likely unused
 - Zone ID must be looked up by name first — it's not the domain name itself
