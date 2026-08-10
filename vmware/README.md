@@ -2,15 +2,36 @@
 
 > ## Account: `ntsupport@cpp-db.com` (changed 2026-08-05)
 >
-> `svcclaude` is **dead for vCenter**. Its password rotated 2026-07-27 *and* its vCenter role
-> assignment was removed, leaving only baseline ReadOnly entries. Do not retry it or burn
-> lockout budget on it. It still works as a **PAN-OS local account** (firewalls have their own
-> user database, key auth verified 2026-08-02 on AVSPAN01/WHPAN01) — that is unrelated.
+> `svcclaude` is **dead for vCenter**, but **not in the way this note used to say.**
+> Corrected 2026-08-10 by live test:
+>
+> - **It still authenticates.** `Connect-VIServer` with the password in
+>   `~/GitHub/.tokens/svcclaude` **succeeds** and reports `CPP-DB\svcclaude`. The earlier
+>   "password rotated, so it fails" framing is wrong for vCenter — the token file holds the
+>   rotated value and vCenter accepts it.
+> - **It holds no role.** `Get-VIPermission | Where Principal -match 'svcclaude'` returns
+>   **nothing** — not "baseline ReadOnly", nothing. It can read a little inventory
+>   (`Get-Datacenter` returns), but `HasPrivilegeOnEntity` throws
+>   `Permission to perform this operation was denied`.
+> - **So a successful login proves nothing.** Writes fail *after* a clean connect, which
+>   makes scripts print their progress lines and reach "Done." having changed nothing.
+>   That is what left `SVSQLMISMK01` half decommissioned.
+>
+> Do not use it for vCenter and do not treat a successful connect as a green light. It still
+> works as a **PAN-OS local account** (firewalls have their own user database, key auth
+> verified 2026-08-02 on AVSPAN01/WHPAN01) — that is unrelated.
 >
 > Password lives in Azure Key Vault, not on disk: `~/GitHub/.tokens/kv-get.sh da-cpp-db-com`.
 >
 > Rights come from AD group `CloudAdmins-AVS`, nested into `vsphere.local\CloudAdmins`
-> (role `CloudAdmin`). There is **no per-user permission entry** for `ntsupport`, by design.
+> (role `CloudAdmin`). There is **no per-user permission entry** for `ntsupport`, by design —
+> so `Get-VIPermission` is useless as a rights test here: it returns nothing for the *good*
+> account too. To test rights, ask vCenter for effective privilege:
+> `$am.HasPrivilegeOnEntity($dc.ExtensionData.MoRef, $sm.CurrentSession.Key, @('VirtualMachine.Config.Rename'))`.
+> Note it takes the **session key**, not a username. `Get-VIPrivilege` has no `-Entity`
+> parameter, and `FetchUserPrivilegeOnEntities` fails to marshal a one-element array from
+> PowerCLI (`Required parameter entities is missing`). Working implementation:
+> `task-tracker/projects/decomm-vm-infra/avs-evacuation/scripts/vcenter.ps1`.
 >
 > Full identity-source detail, run-command history and blast radius: **`avs-identity-source.md`**.
 
