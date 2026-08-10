@@ -150,3 +150,7 @@ lands at mode 644 — tighten it.
 
 - Identity source, vCenter accounts, break-glass: `avs-identity-source.md`
 - REST API and PowerCLI usage: `README.md`
+- **Arc agents failing to start after reboot** (`himds` stopped, service logon right stripped
+  by GPO): `knowledge-base/troubleshoot/seservicelogonright-arc-mde-failures-2026-08-09.md`
+- **Defender for Identity audit configuration** (MDI health alerts, Netwrix coexistence):
+  `knowledge-base/procedures/mdi-audit-configuration.md`
