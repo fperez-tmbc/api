@@ -87,6 +87,28 @@ Keep using the PAN keys. See `api/pan/README.md`.
 - `~/.ssh/id_ed25519` — used for SVDCDC01 and general domain hosts
 - `~/.ssh/id_rsa_svolprodtx01` — RSA key for svolprodtx01 (legacy server, requires legacy algorithm flags)
 
+### 🔴 NEVER print `mount_smbfs` output — it echoes the password
+
+`mount_smbfs` takes credentials inside the URL (`//DOMAIN;user:pass@host/SHARE`) and **repeats
+that URL verbatim in its error text**, so any failed mount prints a working password to the
+console. On 2026-08-04 a loop probing `D$`/`E$`/`F$` on an opp.local host printed the
+`da-opp-local` domain-admin password into a session transcript and forced a rotation.
+
+```python
+r = subprocess.run(['mount_smbfs','-N',url,mp], capture_output=True, text=True)
+if r.returncode != 0:
+    print("mount failed")        # ✅ never r.stderr / r.stdout
+```
+
+Same class of mistake as the PAN API-key incident (see the security note in
+`api/mimecast/README.md`). The rule generalises: **before printing any subprocess's stderr,
+ask whether that tool takes a secret on its command line.** `mount_smbfs`, `curl -u`,
+`sshpass -p` and `net use` all do. Prefer `sshpass -e` with `SSHPASS` in the environment,
+which keeps the secret out of both argv and error text.
+
+Reaching a Windows host over SMB is still the right fallback when SSH and WinRM are shut
+(see the `C$` mount recipe in `api/vmware/README.md`) — just never surface the tool's output.
+
 ---
 
 ## Choosing an Auth Method
