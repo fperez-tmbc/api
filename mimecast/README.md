@@ -75,6 +75,28 @@ as "the docs are inaccessible" and then, wrongly, as "they need Frank's login."
   group is not.
 - **Anti-spoofing policy** (`policy/antispoofing/get-policy`) → `app_forbidden`.
   `policy/antispoofing-bypass/get-policy` exists but needs a specific `id`, so it can't be enumerated.
+- **DNS Authentication policies — the outbound DKIM signing config.** Probed 2026-08-10:
+  `policy/dnsauthentication/get-policy`, `policy/dns-authentication/get-policy`,
+  `policy/dkim/get-policy`, `domain/get-outbound-dkim-key` and
+  `policy/get-policy {policyType: dnsauthoutbound}` all return `app_forbidden`;
+  `directory/get-internal-domain` is a 404. **Which domains get an outbound DKIM signature is
+  console-only** — Administration → Gateway → Policies → *DNS Authentication - Outbound* →
+  **Definitions**.
+
+  > Two distinct policy types, easy to confuse: **DNS Authentication - Inbound** *applies DNS checks*
+  > (DKIM/SPF/DMARC verification) to inbound mail; **DNS Authentication - Outbound** *applies the DKIM
+  > signature*. The inbound description mentions DKIM but does no signing. Only the outbound row
+  > determines whether your mail leaves signed.
+
+  **Empirical fallback when you can't read the policy:** relay a message from the domain to an
+  external mailbox and read the received headers. Verified 2026-08-10 for `themyersbriggs.com` —
+  a message submitted straight to on-prem Exchange (never transiting EXO) arrived at Gmail with
+  `dkim=pass header.s=mimecast20210401 header.d=themyersbriggs.com`, `X-Mimecast-Originator:
+  themyersbriggs.com` and **`dmarc=pass`**. The DMARC aggregate reports (`api/dmarc`) answer the same
+  question across all domains at once, without a test send.
+
+  ⚠ **An inbound `dkim=none` proves nothing about outbound signing** — Mimecast signs on egress only.
+  Judge from an externally-received copy, never from an archived inbound leg.
 - **Group membership WRITES.** `directory/add-group-member` and `directory/remove-group-member` both
   exist and pass schema validation, but every call against the `Permitted senders` group fails with
   `err_xdk_operation_forbidden_for_address` — *"0003 Forbidden To Perform Operation For Address"*.
