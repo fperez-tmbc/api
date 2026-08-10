@@ -755,6 +755,58 @@ policy endpoints:
 an anti-spoofing policy was created at 19:27:28 and messages at 19:00:05 were wrongly cited as proof
 it hadn't broken anything. The audit log is what caught it.
 
+## DNS Authentication — Inbound: vendor baseline vs. what we run
+
+Vendor source: KB `34000468841107` (*DNS Authentication Overview*, recommended table) and
+`34000340541587` (*Configuring DNS Authentication Definition*, bold = recommended). Read them with
+`./mcdocs get <id>`. **The bold-means-recommended convention breaks in the DMARC "Fail" row** — all
+four option *names* are bolded there as labels, so derive that one from the Overview table, not the
+bold runs.
+
+**Mimecast's recommended inbound baseline, and our state as audited 2026-08-10** (Default Inbound
+DNS Authentication Definition). Ours matched on **2 of 14**:
+
+| Check | Result | Recommended | Ours (2026-08-10) |
+|---|---|---|---|
+| SPF | None / Neutral / PermError / TempError | Ignore Managed/Permitted Sender Entries | Take No Action ✗ |
+| SPF | Soft Fail | Ignore Managed/Permitted Sender Entries | ✅ match |
+| **SPF** | **Hard Fail** | **Reject** | Ignore Managed/Permitted ✗ |
+| DKIM | None / PermError / TempError | Ignore Managed/Permitted Sender Entries | Take No Action ✗ |
+| DKIM | Fail | Ignore Managed/Permitted Sender Entries | ✅ match |
+| DMARC | None / PermError / TempError | Ignore Managed/Permitted Sender Entries | Take No Action ✗ |
+| **DMARC** | **Fail** | **Honor DMARC Record** | Ignore Managed/Permitted ✗ |
+
+> ### ⚠ `Take No Action` is NOT the neutral option — it lets allow-lists beat authentication
+>
+> `Ignore Managed/Permitted Sender Entries` **forces** reputation, greylisting and spam checks to
+> run. `Take No Action` lets a **Permitted Senders or Auto Allow entry bypass those checks even
+> though SPF/DKIM/DMARC just failed.** In a tenant with heavy permitted-sender configuration that is
+> the wider exposure, not the two rejection settings. Renaming it in your head as "honor the
+> allow-list anyway" makes the risk obvious.
+
+**Change-risk ranking, for whenever this gets actioned:**
+
+1. **Low risk — the ten `Take No Action → Ignore Managed/Permitted Sender Entries` flips.** They only
+   *add* spam scanning to mail that already failed authentication. Nothing new gets rejected. Do
+   these first and separately.
+2. **High risk — `SPF Hard Fail → Reject`.** Same class of change as the 81-message outage below:
+   any legitimate sender with an incomplete SPF record is rejected outright and you learn about it
+   from the recipient, not a log. **Measure current Hard Fail volume first** via
+   `message-finder`/archive before flipping.
+3. **High risk — `DMARC Fail → Honor DMARC Record`.** Correct in principle (it applies the sending
+   domain's own stated policy) but it **breaks forwarded mail** — mailing lists and forwarders break
+   SPF alignment, so legitimate mail from `p=reject` domains gets rejected. Confirm **ARC** is in
+   play first (KB `34000599190291`, *DMARC Analyzer - Authenticated Received Chain*).
+
+The policy *wrapper* is separate from the definition and ours is already correct: `Addresses Based
+On: Both`, `Applies From: External Addresses` (all external senders), `Applies To: Internal
+Addresses` (all internal recipients), Enable / Always On / All Time, no source IP restriction.
+
+⚠ **`Is External Domain` on an Outbound Signing definition forces 1024-bit signing only** (vendor
+doc, verbatim: *"DKIM signing will only sign using 1024-bit encryption"*). It also requires the
+external domain to have MX records. Do not use it for any domain that matters — it silently undoes
+2048-bit key work.
+
 ## Anti-Spoofing — semantics that are not obvious
 
 > ### ⚠ An `Anti-Spoofing SPF Bypass` policy is a CONSUMER of your SPF record
