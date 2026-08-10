@@ -97,6 +97,16 @@ as "the docs are inaccessible" and then, wrongly, as "they need Frank's login."
 
   ⚠ **An inbound `dkim=none` proves nothing about outbound signing** — Mimecast signs on egress only.
   Judge from an externally-received copy, never from an archived inbound leg.
+- **Group membership WRITES — confirmed blocked on `Blocked Senders` too, 2026-08-10.** Not just
+  Permitted Senders. `directory/remove-group-member` with `{id: <groupId>, emailAddress: ...}` **and**
+  with `{id, domain: ...}` both return HTTP 403 `err_xdk_operation_forbidden_for_address`. The payload
+  shape is right — `folderId` instead of `id` fails schema validation with `err_validation_null` on
+  `id`, proving `id` is the correct field and the 403 is authorization, not syntax. **Reads work,
+  writes don't. Curating these groups is console-only.**
+  Practical console path: `Users & Groups | Profile Groups | <group>`, use the **Search** box then
+  **Clear Selected Links** — searching a domain fragment clears all its entries at once.
+  Always `directory/get-group-members` to JSON first as a backup; the per-entry `notes` are years of
+  incident context and cannot be reconstructed once deleted.
 - **Group membership WRITES.** `directory/add-group-member` and `directory/remove-group-member` both
   exist and pass schema validation, but every call against the `Permitted senders` group fails with
   `err_xdk_operation_forbidden_for_address` — *"0003 Forbidden To Perform Operation For Address"*.
