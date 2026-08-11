@@ -378,22 +378,70 @@ A second field that is a *file extension* rather than a malware family name mean
 the common attachment filter fired, not AV. Confirm with `Get-MessageTraceDetailV2`
 (`550 5.0.350` = file type, not malware).
 
-### Nested `message/rfc822` attachments get a filename derived from their Subject
+### Nested `message/rfc822` names come from the Subject — but the match is NOT deterministic
 
 Forwarded emails attached by Outlook arrive as `Content-Type: message/rfc822` with
-**no `filename` parameter at all**. EOP derives a name from the nested message's
-`Subject`, and then extension-matches it. A forwarded message whose subject ends in
-a hostname is therefore blocked on the hostname's TLD:
+**no `filename` parameter at all**. EOP nonetheless reported a filename, and a full
+MIME walk of the offending message proved the nested `Subject` is the only possible
+source — no part anywhere in the tree had a name ending in `.com`:
 
 ```
 nested Subject : Fwd: Order confirmation from elevate.themyersbriggs.com
-derived name   : Fwd Order confirmation from elevate.themyersbriggs.com
-matched        : com   (on the default blocked-types list)  -> whole message rejected
+EOP reported   : Fwd Order confirmation from elevate.themyersbriggs.com    com
+                 (colon stripped, no .eml suffix -> Subject-derived, not filename-derived)
 ```
 
-True-type matching does not save you here: `com` is not in the true-type supported
-list, so it falls through to simple extension matching. Note this fires on *our own*
-domain names, so any forwarded "…from <host>.com" subject is a candidate.
+> #### ⚠ Do NOT assume this reproduces. It does not.
+>
+> Three counter-examples from the same session, all **delivered normally**:
+>
+> | Case | Result |
+> |---|---|
+> | The **identical** nested `.eml` (same SHA-256) resent 11 min later | Delivered |
+> | Synthetic repro: one nested rfc822, Subject ending `.com` | Delivered |
+> | Synthetic repro: four nested rfc822 + a PDF, ~187 KB, mirroring the original | Delivered |
+>
+> The only observable difference is that the blocked message is the **one that went
+> through Safe Attachments detonation** (`Defer :: [ATP][Scan in progress] Message
+> waiting for detonation result`); none of the three delivered cases were deferred.
+> **Working theory, unproven:** container expansion during detonation is what surfaces
+> the Subject-derived name to the extension matcher, so messages that skip detonation
+> never get evaluated that way.
+>
+> Practical consequence: you cannot predict which forwarded mail this hits, and you
+> cannot reproduce it on demand to test a fix. Do not burn time trying, and do not
+> promise anyone a deterministic rule.
+
+This also contradicts documented precedence. Microsoft states true-type matching wins
+and extension matching is used only *"if true type matching fails or isn't supported."*
+`eml` **is** true-type supported and `com` is **not**, so extension matching should
+never have run here. Worth a false-positive submission rather than a config workaround.
+
+### Mitigation: `FileTypeAction = Quarantine`, not `Reject`
+
+Because the trigger is unpredictable, the durable fix is to change the *consequence*
+rather than chase the cause. `Reject` (the default) bounces the message and the content
+is gone; the recipient never learns it existed. `Quarantine` makes the same block
+recoverable. Verified end to end 2026-08-11:
+
+```python
+invoke("Set-MalwareFilterPolicy", {"Identity":"Default","FileTypeAction":"Quarantine"})
+```
+
+- message lands in quarantine as `QuarantineTypes: FileTypeBlock`
+- the **admin notification still fires** (it is not tied to the Reject action)
+- `Release-QuarantineMessage {"Identity": id, "User": [addr]}` delivers it intact
+
+Note `Get-QuarantineMessage` indexes the message **before** `Get-MessageTraceV2` shows
+it. If the trace has no row yet, check quarantine before concluding anything.
+
+### Submissions to Microsoft are NOT available to an app-only principal
+
+`New-ReportSubmission` and `Get-ReportSubmission` both return **HTTP 403 with a
+null-byte body** (not JSON, so a naive client raises a decode error rather than showing
+the 403). `Get-ReportSubmissionPolicy` and `Get-ReportSubmissionRule` do work, which
+makes the failure look inconsistent. False-positive submissions must be done in the
+Defender portal.
 
 ### `CustomNotifications $true` REQUIRES `CustomFromAddress`
 
