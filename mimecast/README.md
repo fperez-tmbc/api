@@ -108,6 +108,38 @@ as "the docs are inaccessible" and then, wrongly, as "they need Frank's login."
 > and the route segment of that URL **is** the live API path. The developer portal itself is a JS
 > shell (every URL returns the same 2,138-byte app skeleton), so scraping it directly is useless.
 
+> ## ⚠⚠ THESE ENDPOINTS SILENTLY TRUNCATE AT 10 — USE `?pageSize=`
+>
+> `GET /domain/cloud-gateway/v1/internal-domains` returns **exactly 10** domains with **no
+> `@nextLink`, no pagination metadata and no error**. The real answer is 18. Add `?pageSize=500`.
+>
+> Nothing in the response signals truncation. On 2026-08-10 this produced a chain of wrong
+> conclusions: the 10 returned are the alphabetically-first, so `opp.co.uk` (position 13) was
+> invisible, I concluded "this endpoint exposes a different, partial set — `opp.co.uk` must be
+> registered via an LDAP directory the API can't read", and told Frank the removal was unverifiable.
+> It was verifiable all along. The console screenshot showing 18 rows is what exposed it.
+>
+> **Probed 2026-08-10 — only `pageSize` works.** `limit`, `top`, `$top`, `size`, `perPage`, `page`,
+> `pageToken`, `offset`, `skip` are all silently ignored and still return 10.
+>
+> `external-domains` has the same behaviour and caps at **500** even with `pageSize=1000`, so treat
+> a negative result there as inconclusive rather than proof of absence.
+>
+> **Generalised rule: when a root-family endpoint returns a suspiciously round count, assume
+> truncation and re-query with `?pageSize=500` before concluding anything from an absence.**
+
+### Internal Directories (verified 2026-08-10, `?pageSize=500` → 18)
+
+`assessment.opp.co.uk`, `cpp-db.com`, `cpp.com`, `cppasiapacific.com`, `cppasiapacific.sg`,
+`journal.themyersbriggs.com`, `mbtionline.com`, `myersbriggsco.mail.onmicrosoft.com`,
+`myersbriggsco.onmicrosoft.com`, `notices.themyersbriggs.co`, `notifications.mbtionline.com`,
+`notifications.themyersbriggs.co`, `opp.com`, `themyerbriggs.com`, `themyersbriggs.co`,
+`themyersbriggs.com`, `themyersbriggs.net`, `vitanavis.com`
+
+`inboundType` is `ldap` for the four LDAP-synced domains (`cpp.com`, `cpp-db.com`,
+`cppasiapacific.com`/`.sg`), `known` for most, `any` for `notices.themyersbriggs.co`.
+`myersbriggsco.mail.onmicrosoft.com` is `sendOnly: true`. **`opp.co.uk` removed 2026-08-10.**
+
 ### Blocked Senders policies — what is actually wired up (2026-08-10)
 
 `GET /policy-management/cloud-gateway/v1/blocked-senders/policies` → 4 policies:
@@ -940,6 +972,79 @@ Addresses` (all internal recipients), Enable / Always On / All Time, no source I
 doc, verbatim: *"DKIM signing will only sign using 1024-bit encryption"*). It also requires the
 external domain to have MX records. Do not use it for any domain that matters — it silently undoes
 2048-bit key work.
+
+## Custom NDRs for a retired domain — Notification Sets (worked end-to-end 2026-08-10)
+
+Goal: an external sender writing to a dead address gets an immediate, branded bounce naming a live
+contact, instead of a four-day silent failure. Achieved for `assessment@assessment.opp.co.uk`.
+**Console-only** — notification set config is not in the API.
+
+**Setup that works:**
+1. `Policies | Gateway Policies | Definitions | Notification Sets` → new set.
+2. Edit the **Delivery Failure Notification** inside it (Plain Text Body *and* HTML Body — which one
+   renders is the recipient MTA's choice, and it is easy to change one and forget the other).
+3. Apply it with a Notification Sets **policy** scoped `Everyone` → the specific address.
+4. Delete the domain's delivery route/policy so the bounce is immediate: with no route, Mimecast
+   falls back to EXO, EXO hard-rejects `550 5.7.64 Relay Access Denied` (not an accepted domain),
+   and Mimecast emits the NDR. Verified **1 attempt over 0 hours**.
+
+### Three vendor-doc contradictions found the hard way
+
+- **"Message Bounce Notification" is NOT the one that fires.** The reference list (KB
+  `34000628350099`) scopes both it and **Delivery Failure Notification** to *Outbound Emails
+  (Internal Senders)*, and lists only *Hold for Review Rejection* under *Inbound Emails (External
+  Sender)*. **Wrong** — Delivery Failure Notification demonstrably fires for inbound mail from
+  external senders. Identify the right template by the live NDR's subject/body, not by the scope
+  column. Ours: subject `[Postmaster] Email Delivery Failure`, body *"could not be delivered … This
+  condition occurred after [attempts] attempt(s)"*.
+- **Policies match on the ORIGINAL RECIPIENT, not the notification destination.** KB `34000700012947`
+  says sets are *"not based on how the email they take action on is set but rather on where the
+  notification set is being sent"* — which would mean the external sender. In practice a policy
+  scoped `To: assessment@assessment.opp.co.uk` works. Scope by the address that was written to.
+- **Square brackets are variable syntax in the Subject field too.** Literal brackets must be escaped:
+  `\[Postmaster\]`. `[mailto]` expands in the subject.
+
+### Variables (Delivery Failure Notification)
+
+`[mailto]` recipient · `[message]` failure reason · `[info]` diagnostic · `[attempts]` · `[hours]` ·
+also `[mailfrom]`, `[subject]`, `[messagedate]`, `[minutes]`, `[copyrightfooter_html]`.
+⚠ `[copyrightfooter_html]` renders **Mimecast's** copyright, and `[custom-brand-logo]` falls back to
+**Mimecast's logo** when no brand set is configured — three vendor mentions on mail to your customers.
+
+> ### 🔑 THE NDR's `From` DOMAIN MUST MATCH THE DOMAIN THE SENDER WROTE TO
+>
+> This governs inbox vs spam placement, and **authentication does not**. Established by controlled
+> tests, byte-identical bodies:
+>
+> | From | Auth | Gmail |
+> |---|---|---|
+> | `support.eu@themyersbriggs.com` | dmarc=pass | **spam** |
+> | `postmaster@assessment.opp.co.uk` | dmarc=pass | **inbox** |
+> | `assessment@assessment.opp.co.uk` | dmarc=pass | **inbox** |
+>
+> The local part is irrelevant (`postmaster@`, `assessment@` both fine); the **domain** is what
+> matters. Gmail correlates at domain level, **Zoho at address level** — it filtered
+> `postmaster@assessment.opp.co.uk` but accepted `assessment@assessment.opp.co.uk`. So the most
+> robust sender is **the exact address that was written to**.
+>
+> **Consequence: every retiring domain needs its own outbound DKIM signing definition + published
+> key before it can carry a custom NDR.** Pointing them all at one shared postmaster address puts
+> them all in spam. `assessment.opp.co.uk` needed `mimecast20260810._domainkey` created for this.
+>
+> **Also update that domain's SPF.** It is now a sending domain. `v=spf1 -all` appears to work
+> because NDRs carry `Return-Path: <>` so receivers evaluate SPF against Mimecast's HELO domain —
+> but it is wrong and breaks any non-null-return-path mail. Use
+> `v=spf1 include:us._netblocks.mimecast.com -all`.
+
+### Content findings (secondary to the sender rule)
+
+- A hand-rolled HTML body with a dark **CTA button** linking to an alternate address was filtered even
+  with a good sender. The stock Mimecast template plus plain `<p>` prose — including the alternate
+  address and a `mailto:` link — reaches the inbox.
+- **Yahoo spam-folders all of them** regardless of sender, content or auth. Not winnable; stop tuning.
+- Don't over-test: ~15 near-identical messages to one mailbox inside 90 minutes is itself a spam
+  signal and will corrupt your A/B results.
+- `Restore Default` on the notification is the clean way back to a known-good baseline.
 
 ## Anti-Spoofing — semantics that are not obvious
 
