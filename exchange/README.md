@@ -317,3 +317,145 @@ invoke("Get-Recipient",           {"ResultSize": "Unlimited"})   # build identit
 
 Note `Remove-MailboxPermission` needs `-Deny` to remove Deny ACEs (see memory
 `feedback-exchange-deny-ace`); a scan that filters Deny out never surfaces them.
+
+## Message tracing — `Get-MessageTrace` is dead, use `Get-MessageTraceV2`
+
+`Get-MessageTrace` now returns **HTTP 400**, not a deprecation warning:
+
+```
+|Microsoft.Exchange.Management.Tasks.ValidationException|Get-MessageTrace will
+start deprecating on September 1st, 2025. Please refer to: ... Get-MessageTraceV2
+```
+
+It fails with *and without* date parameters, so this reads like a bad-payload
+error rather than a retired cmdlet. Substitute `Get-MessageTraceV2` and the same
+parameters work unchanged:
+
+```python
+invoke("Get-MessageTraceV2", {"SenderAddress": "someone@example.com",
+                              "StartDate": "2026-08-11 00:00",
+                              "EndDate":   "2026-08-12 00:00"})
+```
+
+`"YYYY-MM-DD HH:MM"` is accepted. Returns `Received`, `Status`, `Size`,
+`MessageId`, `MessageTraceId`, `RecipientAddress`, `Subject`.
+
+**`Status` alone will not tell you *why* a message failed.** For that, pass
+`MessageTraceId` **and** `RecipientAddress` (both required, plus the date range)
+to `Get-MessageTraceDetailV2`:
+
+```python
+invoke("Get-MessageTraceDetailV2", {"MessageTraceId": row["MessageTraceId"],
+                                    "RecipientAddress": row["RecipientAddress"],
+                                    "StartDate": "...", "EndDate": "..."})
+```
+
+That returns the per-hop event chain (`Receive`, `Defer`, `Journal`, `Deliver`,
+`Fail`) with the real SMTP reason in `Detail`, e.g.
+`550 5.0.350 One or more of the attachments in your email is of a file type that
+is NOT allowed by the recipient's organization.` The trace row just said `Failed`.
+
+## Anti-malware policy — admin notifications and the common attachment filter
+
+Worked out 2026-08-11 while tracing why netops kept receiving mail titled
+*"Undeliverable message"* that read like a bounce for something they had sent.
+
+### The "malware" wording is frequently a lie — check for a file-type block first
+
+Admin notifications say *"not delivered to the intended recipients because malware
+was detected"* even when nothing was scanned as malware. Microsoft's own docs are
+explicit: *"Because the block is from an admin-defined policy, these messages don't
+get a malware verdict."* The `Detections found:` line is the discriminator, and its
+format is **`<filename>` TAB `<matched extension>`**:
+
+```
+Detections found: 
+Fwd Order confirmation from elevate.themyersbriggs.com	com
+attachment-filter-test.com	com
+```
+
+A second field that is a *file extension* rather than a malware family name means
+the common attachment filter fired, not AV. Confirm with `Get-MessageTraceDetailV2`
+(`550 5.0.350` = file type, not malware).
+
+### Nested `message/rfc822` attachments get a filename derived from their Subject
+
+Forwarded emails attached by Outlook arrive as `Content-Type: message/rfc822` with
+**no `filename` parameter at all**. EOP derives a name from the nested message's
+`Subject`, and then extension-matches it. A forwarded message whose subject ends in
+a hostname is therefore blocked on the hostname's TLD:
+
+```
+nested Subject : Fwd: Order confirmation from elevate.themyersbriggs.com
+derived name   : Fwd Order confirmation from elevate.themyersbriggs.com
+matched        : com   (on the default blocked-types list)  -> whole message rejected
+```
+
+True-type matching does not save you here: `com` is not in the true-type supported
+list, so it falls through to simple extension matching. Note this fires on *our own*
+domain names, so any forwarded "…from <host>.com" subject is a candidate.
+
+### `CustomNotifications $true` REQUIRES `CustomFromAddress`
+
+Setting the flag without an address fails, so you cannot customise only the name:
+
+```
+CustomFromAddress: The CustomFromAddress value is not set.
+Custom notifications cannot be enabled without a valid CustomFromAddress.
+```
+
+### ⚠ `CustomFromAddress` is NOT VALIDATED — a typo fails silently
+
+`Set-MalwareFilterPolicy` accepted `m365-alerts@notarealdomain.example` with a
+`200`. There is no check that the address exists, or that the domain is even ours.
+**"The setting saved" is not evidence notifications will send.** Always follow a
+change here with a real test detection before trusting it.
+
+### `CustomFromName` is overridden whenever the address resolves to a mailbox
+
+Outlook renders the *directory object's* DisplayName, not `CustomFromName`. With
+`CustomFromAddress = postmaster@…`, which was a proxy address on the Marketing
+shared mailbox, every security alert arrived as **"Marketing"** no matter what
+`CustomFromName` said:
+
+```
+header   : From: "M365 Defender Admin Alert" <postmaster@themyersbriggs.com>
+rendered : Marketing <marketing.us@themyersbriggs.com>
+```
+
+**To control the rendered name, control the object** — point `CustomFromAddress` at
+a dedicated mail-enabled object and set *its* DisplayName. `CustomFromName` only
+renders if the address resolves to nothing, which is untested and risks the silent
+failure above. Check what an address resolves to before choosing it:
+
+```
+users?$filter=proxyAddresses/any(p:p eq 'smtp:<addr>')&$select=displayName
+groups?$filter=proxyAddresses/any(p:p eq 'smtp:<addr>')&$select=displayName
+```
+
+### A custom body does NOT suppress the detail block
+
+Verified by test send: EOP still appends its `--- Additional Information ---`
+section (Subject / Sender / Time received / Message ID / Detections found) beneath
+`CustomExternalBody` / `CustomInternalBody`. Customising the text costs nothing.
+
+### Check preset policies before assuming the Default policy applies
+
+Preset security policies are evaluated **before** the Default policy and have admin
+notifications hard-off, so recipients in scope of a preset generate no notification
+at all. Both of these returning empty means no preset is assigned to anyone and the
+Default policy really does cover the tenant:
+
+```python
+invoke("Get-EOPProtectionPolicyRule")   # empty -> Standard/Strict assigned to nobody
+invoke("Get-ATPProtectionPolicyRule")
+```
+
+### Recipient and policy objects also lag reads (see §2 above)
+
+The same write/read lag documented for mailbox permissions applies to
+`Set-MalwareFilterPolicy` and to newly created recipients. Hit three times in one
+session: a policy read straight after a successful `200` returned every field at its
+**old** value, and `New-DistributionGroup` reported `Members: []` and
+`HiddenFromAddressListsEnabled: False` when both had in fact been set. Poll until
+the value you wrote comes back; never judge a write by the read that follows it.
