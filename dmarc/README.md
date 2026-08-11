@@ -67,10 +67,29 @@ several are one message seen from multiple angles. `analyze-reports.py` separate
 **`policy_evaluated` is per-record, not per-signature.** Attributing it to every selector in
 a multi-signature record inflates pass counts.
 
-**Retention is whatever the mailbox holds, and it is probably shorter than you assume.**
-Verified 2026-07-31: five domains all start on the **same day** (2026-06-28) and the mailbox
-only goes back to 2026-04-28. A simultaneous start across unrelated zones is when `rua=`
-was set, not coincidence. Nothing older is visible.
+**Retention is 31 days, and a first-seen date is the retention edge — NOT when `rua=` was set.**
+This corrects the note recorded here on 2026-07-31, which read the shared first-seen date across
+unrelated zones as a configuration event. It is not. The edge *slides*: measured again on
+2026-08-10, ten days later, the domain first-seen had moved 2026-06-28 → 2026-07-11 and the mailbox
+floor 2026-04-28 → 2026-05-17. Anything that moves with the calendar is a retention boundary.
+
+Root cause, confirmed by tag GUID rather than by arithmetic: the RUA mailbox has
+`TheMBC 3 Month Retention Policy`, but someone applied the **personal** tag
+`Personal - 1 Month Delete` (31 days, `DeleteAndAllowRecovery`) to the **`DMARC Reports` folder**
+specifically. A server-side rule files reports there, so they die at 31 days while the rest of the
+mailbox lives 92. That is why Inbox items survive from May and no report does.
+
+```python
+# folder -> applied retention tag. PidTagPolicyTag = Binary 0x3019, holds the tag GUID (bytes_le)
+ep = "singleValueExtendedProperties($filter=id eq 'Binary 0x3019')"
+requests.get(f"{G}/users/{MB}/mailFolders?$top=100&$select=displayName&$expand={ep}", headers=H)
+# then match uuid.UUID(bytes_le=base64.b64decode(v)[:16]) against Get-RetentionPolicyTag RetentionId
+```
+
+Two practical consequences. **`DeleteAndAllowRecovery` means expired reports are still in
+Recoverable Items** — 881 of them as of 2026-08-10, roughly another month of history, retrievable
+until they age out of Deletions too. And **removing the folder tag triples the window** to the
+92-day default with no other change. Neither has been done; both are Frank's call.
 
 ## What this data can and cannot answer
 
