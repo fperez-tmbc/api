@@ -638,6 +638,30 @@ curl -s -X POST "https://us-api.services.mimecast.com/api/message-finder/search"
   no `receiptEvent`, no `policyInfo`. Do not rely on it for the envelope pair or for which policies
   fired; take the envelope from `message-finder/search` (`fromEnv`) and the authentication verdict
   from `archive/get-message-detail` headers instead.
+
+  > ### ⚠⚠ `deliveredMessage` DOES NOT MEAN THE MESSAGE WAS DELIVERED
+  >
+  > It is a map keyed by **intended recipient** and is populated even when delivery failed outright.
+  > On 2026-08-10 this made me reverse a correct finding: mail to `assessment@assessment.opp.co.uk`
+  > was bouncing because the Mimecast delivery route pointed at `prodsmtp.opp.com`, a host
+  > **decommissioned months earlier and resolving nowhere** (absent from public DNS, the Cloudflare
+  > `opp.com` zone, and all three opp.local DCs). Every message still carried a
+  > `deliveredMessage["assessment@assessment.opp.co.uk"]` block, so I concluded delivery had
+  > succeeded and told Frank the flow was healthy. It was not — the console's **Delivery view showed
+  > `bounced`** while the **Received view showed fine**.
+  >
+  > **`status` on `message-finder/search` is the field that matters**, and even that needs care:
+  > `archived` means *Mimecast holds a copy*, not *the recipient got it*. Archiving happens on
+  > acceptance. A message can be `archived` and still bounce days later.
+  >
+  > **Never infer delivery from the API alone.** The console's separate Received / Delivery views are
+  > the reliable discriminator. If you only have the API, the honest statement is "Mimecast accepted
+  > it", not "it was delivered".
+  >
+  > Related trap from the same investigation: **do not pair `archived` messages with later
+  > `Soft Bounce` rows by sender and infer a retry cycle.** Those are separate messages. I built a
+  > phantom "4-day retry then bounce" pattern out of that coincidence.
+
 - `gateway/get-hold-message-list` returns held messages **directly as `data[]`** (not nested under a
   `heldMessages` key). Fields: `from` (envelope), `fromHeader`, `reason`, `reasonCode`, `policyInfo`.
 
