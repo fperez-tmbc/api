@@ -86,6 +86,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mailbox", default=DEFAULT_MAILBOX)
     ap.add_argument("--out", default=os.path.join(here, "reports"))
+    ap.add_argument("--folder", default=None,
+                    help="Restrict to one folder. Accepts a folder id or a well-known "
+                         "name. Use 'recoverableitemsdeletions' to harvest reports the "
+                         "retention tag already deleted -- /users/{id}/messages does NOT "
+                         "reach the Recoverable Items subtree, so they are invisible "
+                         "without this.")
     a = ap.parse_args()
 
     os.makedirs(a.out, exist_ok=True)
@@ -94,9 +100,11 @@ def main():
     # Page to the end. An unpaged call silently truncates -- that once produced a
     # baseline built on 65 of 1,911 reports and understated a selector's signing
     # count by more than an order of magnitude.
-    msgs, url = [], (GRAPH + "/users/%s/messages"
+    scope = ("/users/%s/mailFolders/%s/messages" % (a.mailbox, a.folder) if a.folder
+             else "/users/%s/messages" % a.mailbox)
+    msgs, url = [], (GRAPH + scope +
                      "?$select=id,subject,receivedDateTime,hasAttachments"
-                     "&$filter=hasAttachments eq true&$top=100" % a.mailbox)
+                     "&$filter=hasAttachments eq true&$top=100")
     while url:
         d = get_json(url, hdr)
         msgs.extend(d.get("value", []))

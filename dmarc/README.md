@@ -25,14 +25,27 @@ selector directly and are useful for a single incident, but carry the same short
 | `fetch-reports.py` | Download + decompress every attachment to `./reports/` (skips existing) |
 | `analyze-reports.py <domain>` | Selector, envelope, and policy breakdown for one domain |
 | `report-coverage.py` | How far back the data can possibly see, per domain |
+| `failing-senders.py [domain]` | Who is sending as us and **failing** DMARC, by source IP + disposition |
+| `selector-timeline.py <domain> <sel,sel>` | Per-day pass/fail for named DKIM selectors — use to prove a key cutover |
 
 ```bash
 ./report-coverage.py                                  # bound your conclusions FIRST
 ./fetch-reports.py                                    # 10-15 min, ~1,900 Graph calls
+./fetch-reports.py --folder recoverableitemsdeletions # ALSO harvest already-deleted reports
 ./analyze-reports.py themyersbriggs.net
 ./analyze-reports.py themyersbriggs.net --grep s1,s2,em9338
 ./analyze-reports.py --list                           # per-domain breakdown only
+./failing-senders.py cpp.com --min 3
+./selector-timeline.py themyersbriggs.com salesforce1,sf2048
 ```
+
+**Always run the `--folder recoverableitemsdeletions` pass too.** `/users/{id}/messages` does not
+reach the Recoverable Items subtree, so expired-but-recoverable reports are invisible to the normal
+fetch. On 2026-08-10 that pass added **842 reports to a 1,864-report corpus** and extended the
+window from 31 to 67 days. `Restore-RecoverableItems` is *not* the way to get at them — it is gated
+behind the `Mailbox Import Export` role, which is assigned to no role group by default and is the
+mailbox-export privilege. Reading the folder with `Mail.ReadWrite` needs no grant and mutates
+nothing.
 
 `reports/` is gitignored. Fetch is separate from analysis on purpose: the download is slow
 and you will change the question more than once.
