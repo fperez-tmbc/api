@@ -86,10 +86,44 @@ requests.get(f"{G}/users/{MB}/mailFolders?$top=100&$select=displayName&$expand={
 # then match uuid.UUID(bytes_le=base64.b64decode(v)[:16]) against Get-RetentionPolicyTag RetentionId
 ```
 
-Two practical consequences. **`DeleteAndAllowRecovery` means expired reports are still in
-Recoverable Items** — 881 of them as of 2026-08-10, roughly another month of history, retrievable
-until they age out of Deletions too. And **removing the folder tag triples the window** to the
-92-day default with no other change. Neither has been done; both are Frank's call.
+**Tag removed 2026-08-10 — the window is now 92 days.** Reports fetched before that date are still
+bounded at 31.
+
+**`DeleteAndAllowRecovery` means the expired reports were not purged** — 881 were sitting in
+Recoverable Items on 2026-08-10, roughly another month of history. They age out of Deletions on
+their own schedule, so that is a closing window, and recovering them has not been done.
+
+### Removing a personal retention tag from a folder (there is no cmdlet)
+
+Personal tags are applied **by users**, so there is no admin cmdlet to clear one — `Set-Mailbox`
+and the retention-policy cmdlets all operate a level above this. The supported paths are OWA
+(right-click folder → *Assign Policy* → *Use parent folder policy*) or writing the MAPI properties
+directly. Graph can do the latter with `Mail.ReadWrite`:
+
+```python
+url = f"{G}/users/{MB}/mailFolders/{urllib.parse.quote(folder_id, safe='')}"
+requests.patch(url, headers=H, json={"singleValueExtendedProperties": [
+    {"id": "Binary 0x3019",  "value": None},   # PidTagPolicyTag       — the tag GUID
+    {"id": "Integer 0x301A", "value": None},   # PidTagRetentionPeriod — age limit in days
+    {"id": "Integer 0x301D", "value": None}]}) # PidTagRetentionFlags
+```
+
+**Save the three values first** — restoring is the same PATCH with them filled back in, and that is
+the entire rollback.
+
+`PidTagRetentionFlags` is the tell. `0x09` = `ExplicitTag|PersonalTag`, i.e. a human applied this by
+hand. After a successful clear it becomes `0x80` = `NeedsRescan`, which is Exchange queueing the
+folder for re-stamping — that value is confirmation the write landed, not a leftover. Then force it
+rather than waiting on the assistant's own schedule:
+
+```python
+invoke("Start-ManagedFolderAssistant", {"Identity": MB})   # EXO REST InvokeCommand
+```
+
+**Items in the folder carried no retention stamps of their own** (`0x301C`/`0x301A` empty on every
+message sampled) — they inherit from the folder. That is what makes this safe: there are no
+individually-stamped items to re-stamp, so clearing the folder tag changes their fate outright.
+Had the items been stamped, the docs are explicit that they keep expiring on the old tag's terms.
 
 ## What this data can and cannot answer
 
