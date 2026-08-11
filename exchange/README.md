@@ -464,25 +464,48 @@ SCC cmdlet still returned `Forbidden`. Purview/Defender keeps its own role group
 membership there is a separate grant. Assigning more Entra roles will not fix it —
 do not keep stacking privilege hoping it propagates.
 
-### What `claude-m365` can and cannot grant itself
-
-It holds `RoleManagement.ReadWrite.Directory`, so it **can assign itself Entra directory
-roles** unattended (`POST /roleManagement/directory/roleAssignments` succeeded for
-Security Administrator with no extra approval). ⚠ That is a privilege-escalation path to
-almost anything; treat the app as effectively tenant-admin when reasoning about blast
-radius.
-
-It does **not** hold `AppRoleAssignment.ReadWrite.All`, so it **cannot grant itself Graph
-app roles**:
+### Use the Graph submissions API instead — and note it is BETA only
 
 ```
-POST /servicePrincipals/<sp>/appRoleAssignments
-  -> Authorization_RequestDenied: Insufficient privileges to complete the operation.
+GET/POST https://graph.microsoft.com/beta/security/threatSubmission/emailThreats   # 200
+GET      https://graph.microsoft.com/v1.0/security/threatSubmission/...            # 400
+         "Resource not found for the segment 'threatSubmission'"
 ```
 
-So `ThreatSubmission.ReadWrite.All` (Graph app role
-`d72bdbf4-a59b-405c-8b04-5995895819ac`, the native submissions API) has to be granted by
-a Global Admin. Until then, false-positive submissions are a Defender portal action.
+Granted to `claude-m365` as Graph app role `ThreatSubmission.ReadWrite.All`
+(`d72bdbf4-a59b-405c-8b04-5995895819ac`) on 2026-08-11. This is the supported app-only
+route; the `New-ReportSubmission` cmdlet is not.
+
+### ⚠ Neither escalation path is open any more — grant permissions with `az`
+
+Resolved 2026-08-11. Previously the app held `RoleManagement.ReadWrite.Directory` and
+could **assign itself any Entra directory role unattended**, with no approval step. That
+was removed at Frank's instruction and replaced with `RoleManagement.Read.Directory`, so
+role **auditing still works** while self-assignment does not:
+
+```
+GET  /roleManagement/directory/roleDefinitions    -> 200  (145 rows)
+GET  /roleManagement/directory/roleAssignments    -> 200
+POST /roleManagement/directory/roleAssignments    -> 403 Authorization_RequestDenied
+POST /servicePrincipals/<sp>/appRoleAssignments   -> 403 Authorization_RequestDenied
+```
+
+**Consequence: the app can no longer grant itself anything.** New app roles and directory
+roles must be assigned with **`az rest` as `2fperez@`**, which is verified working:
+
+```zsh
+az rest --method POST \
+  --url "https://graph.microsoft.com/v1.0/servicePrincipals/<sp>/appRoleAssignments" \
+  --headers "Content-Type=application/json" \
+  --body '{"principalId":"<sp>","resourceId":"<graph-sp>","appRoleId":"<role>"}'
+```
+
+Graph SP object id in this tenant: `98ba181e-bb52-46c6-abbf-da27c8d1af20`.
+
+⚠ **A newly granted app role needs a NEW token**, and it does not appear immediately —
+the first token issued after the grant still lacked it, the next one (about 25 s later)
+carried it. Decode the JWT `roles` claim to confirm before concluding a permission
+"didn't work".
 
 ### `CustomNotifications $true` REQUIRES `CustomFromAddress`
 
