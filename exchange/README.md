@@ -435,13 +435,54 @@ invoke("Set-MalwareFilterPolicy", {"Identity":"Default","FileTypeAction":"Quaran
 Note `Get-QuarantineMessage` indexes the message **before** `Get-MessageTraceV2` shows
 it. If the trace has no row yet, check quarantine before concluding anything.
 
-### Submissions to Microsoft are NOT available to an app-only principal
+### Submissions to Microsoft — app-only is blocked by a SECOND RBAC layer
 
-`New-ReportSubmission` and `Get-ReportSubmission` both return **HTTP 403 with a
-null-byte body** (not JSON, so a naive client raises a decode error rather than showing
-the 403). `Get-ReportSubmissionPolicy` and `Get-ReportSubmissionRule` do work, which
-makes the failure look inconsistent. False-positive submissions must be done in the
-Defender portal.
+`New-ReportSubmission` / `Get-ReportSubmission` are **Security & Compliance** cmdlets,
+not Exchange Online ones. That distinction is what makes this confusing:
+
+| Endpoint | Cmdlet | Result |
+|---|---|---|
+| `outlook.office365.com` | `Get-ReportSubmissionPolicy` | ✅ 200 |
+| `outlook.office365.com` | `Get-ReportSubmission` / `New-ReportSubmission` | ❌ 403, **body is 470 null bytes** |
+| `ps.compliance.protection.outlook.com` | all three | ❌ 403, *"User is not allowed to call …"* |
+
+> #### 🔑 The two endpoints fail differently, and that is the diagnostic
+>
+> The EXO endpoint returns **403 with a null-byte body** for cmdlets it does not host.
+> A naive client raises `json.JSONDecodeError` / `ContentDecodingError` and you chase a
+> transport bug. The **compliance endpoint returns a real JSON RBAC error** naming the
+> cmdlet. **Always re-test a suspicious 403 against
+> `ps.compliance.protection.outlook.com` before concluding anything** — that is what
+> separates "wrong endpoint" from "insufficient rights".
+>
+> Compliance-endpoint token scope: `https://ps.compliance.protection.outlook.com/.default`
+
+**Entra directory roles do NOT confer Security & Compliance RBAC on a service
+principal.** Verified 2026-08-11: with **Exchange Administrator + Compliance
+Administrator + Security Administrator** all assigned and confirmed on the SP, every
+SCC cmdlet still returned `Forbidden`. Purview/Defender keeps its own role groups, and
+membership there is a separate grant. Assigning more Entra roles will not fix it —
+do not keep stacking privilege hoping it propagates.
+
+### What `claude-m365` can and cannot grant itself
+
+It holds `RoleManagement.ReadWrite.Directory`, so it **can assign itself Entra directory
+roles** unattended (`POST /roleManagement/directory/roleAssignments` succeeded for
+Security Administrator with no extra approval). ⚠ That is a privilege-escalation path to
+almost anything; treat the app as effectively tenant-admin when reasoning about blast
+radius.
+
+It does **not** hold `AppRoleAssignment.ReadWrite.All`, so it **cannot grant itself Graph
+app roles**:
+
+```
+POST /servicePrincipals/<sp>/appRoleAssignments
+  -> Authorization_RequestDenied: Insufficient privileges to complete the operation.
+```
+
+So `ThreatSubmission.ReadWrite.All` (Graph app role
+`d72bdbf4-a59b-405c-8b04-5995895819ac`, the native submissions API) has to be granted by
+a Global Admin. Until then, false-positive submissions are a Defender portal action.
 
 ### `CustomNotifications $true` REQUIRES `CustomFromAddress`
 
