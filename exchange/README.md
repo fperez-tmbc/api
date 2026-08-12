@@ -693,10 +693,42 @@ of the sign-in logs for the client that is actually failing.
 Every one failed with `The operation couldn't be completed. (com.apple.accounts error 3.)`.
 It looked exactly like the EWS app-ID allowlist introduced three days earlier. **It was not.**
 
-### Root cause: `autodiscover.outlook.com` refusing TLS, globally
+> ### ✅ CONCLUSION: the Exchange Online side is PROVEN GOOD. The fault is client-side.
+>
+> Settled by acquiring a **delegated** EWS token using **Apple's own app ID** and making the
+> same call Apple Mail makes (recipe below). It returned **HTTP 200 with a FolderId**.
+>
+> ```
+> appid=f8d98a96-0999-43f5-8af3-69971c7bb423   scp=EAS.AccessAsUser.All EWS.AccessAsUser.All
+> EWS GetFolder -> HTTP 200   X-CalculatedBETarget: LV8PR22MB4454.namprd22.prod.outlook.com
+> ```
+>
+> So EWS accepts Apple Internet Accounts, with Apple's exact scopes, in delegated context,
+> against this tenant. That rules out the allowlist, EWS availability, the app ID being
+> blocked, consent, and tenant policy **as a class**. Affected users also authenticate
+> cleanly (`errorCode 0`, CA success, MFA satisfied) and fail only afterwards.
+>
+> Remaining suspect: **macOS Apple Mail itself** (all affected clients were macOS 26.6).
+> Stop looking at Exchange.
+>
+> Three causes were asserted before reaching this, and **all three were wrong**: the EWS
+> allowlist, the PAN firewall, then a broken Autodiscover endpoint. The method errors that
+> produced them are documented below and are the durable value here.
+>
+> Scope caveat, stated honestly: the probe ran as a different mailbox (`2fperez`) than the
+> affected users. Their `Get-CASMailbox` settings were separately verified identical and
+> clean, and the tenant-wide consent grant covers all users, so it is representative of
+> tenant policy — but it is not literally their mailbox.
+
+### Real but UNPROVEN as the cause: `autodiscover.outlook.com` refusing TLS, globally
+
+⚠️ **This anomaly is real and reproducible, but it is NOT demonstrated to be the cause.**
+Every affected user authenticated successfully, which means their client got *past*
+discovery. Recorded because it is genuinely odd and independently verified, not because it
+explains the symptom.
 
 Every Microsoft 365 tenant's `autodiscover.<domain>` CNAMEs to `autodiscover.outlook.com`.
-On that date it **accepted connections on port 80 but refused every connection on 443**, on
+On 2026-08-12 it **accepted connections on port 80 but refused every connection on 443**, on
 every IP in the pool:
 
 ```
@@ -715,7 +747,7 @@ curl "https://outlook.office365.com/autodiscover/autodiscover.json?Email=user@do
 # → {"Protocol":"EWS","Url":"https://outlook.office365.com/EWS/Exchange.asmx"}
 ```
 
-### The false lead, and why it was convincing
+### False lead #1: the EWS allowlist
 
 The allowlist went in on 08-09; Apple Mail broke on 08-11. Apple was absent from the list,
 iPhones (EAS) were unaffected, and sign-in logs showed authentication succeeding then the
@@ -733,25 +765,47 @@ Supporting evidence that the retirement docs corroborate: *Prepare for EWS retir
 states app-ID enforcement begins **October 2026**, so a populated list may not be enforced
 at all before then.
 
-### Distinguishing pre-auth from post-auth failure — do this FIRST
+### False lead #2: "that user never reached Entra" — SIGN-IN LOG LATENCY
 
-Apple's error dialog is identical for both, which hides the most important clue. Query
-sign-in logs per user, filtered to the Apple app ID:
+⚠️ **This one is the most transferable trap in the whole incident, and it is easy to repeat.**
 
-| Sign-in record exists? | Meaning |
+Sign-in logs were queried ~5 minutes after a user's failed attempt, came back empty, and
+that emptiness was reported as fact: *"no sign-in record, so it failed before
+authentication."* An entire second theory (Autodiscover/DNS/network for that user) was built
+on it. **The records existed.** They simply had not been indexed yet, and appeared later
+with `errorCode 0`, `interactiveUser`, exactly like everyone else's. The user had in fact
+typed their password and completed an MFA prompt, which they said plainly — and their
+account of their own actions should have outweighed an empty query.
+
+**Rules:**
+
+- **Entra sign-in indexing lag routinely exceeds 5 minutes.** Never conclude "no record"
+  from a single query shortly after the event. Re-query several minutes later, and prefer
+  the user's own account of what they did.
+- **`/v1.0/auditLogs/signIns` returns INTERACTIVE sign-ins only.** Non-interactive legs are
+  silently excluded, so a client whose failing leg is non-interactive looks absent. Use
+  `beta` and filter explicitly:
+
+  ```bash
+  # include BOTH event types, and bound the window - $top alone will truncate a busy tenant
+  F="userId eq '<objectId>' and createdDateTime ge 2026-08-12T15:35:00Z and createdDateTime le 2026-08-12T16:05:00Z and (signInEventTypes/any(t: t eq 'interactiveUser') or signInEventTypes/any(t: t eq 'nonInteractiveUser'))"
+  az rest --method GET --url "https://graph.microsoft.com/beta/auditLogs/signIns?\$filter=<urlencoded F>&\$top=200"
+  ```
+
+- **Bound the time window; don't rely on `$top`.** A tenant-wide query with `$top=400`
+  covered only ~13 minutes here and truncated away the very records being looked for.
+
+### Stage before cause: pre-auth vs post-auth
+
+Still the right first question — just answer it with data you trust:
+
+| Signal | Meaning |
 |---|---|
-| **No record at all** | Failed **before** authentication → Autodiscover / DNS / network |
-| Record with `errorCode 0` | Authenticated fine, failed **after** → EWS / authorization |
+| Record with `errorCode 0` | Authenticated fine, failed **after** → EWS / authorization / client |
+| Genuinely no record, confirmed after latency | Failed **before** authentication → Autodiscover / DNS / network |
 
-In this incident one user had **zero** records while another had five clean ones, which
-proved they were failing at different stages and were never one shared cause. Chasing a
-single explanation for all three wasted most of the investigation.
-
-```bash
-az rest --method GET --url "https://graph.microsoft.com/v1.0/auditLogs/signIns?\$filter=appId eq 'f8d98a96-0999-43f5-8af3-69971c7bb423'&\$top=40"
-```
-
-Sign-in logs lag ~2 minutes. Do not treat a missing record as absent until that has passed.
+In this incident all three users turned out to be in the **first** row: authentication clean,
+failure after. The apparent split between them was an artefact of the latency trap above.
 
 ### Check the routing table before blaming the firewall
 
@@ -805,3 +859,36 @@ assume this indicates a tenant misconfiguration.
 
 Note the probe's limit: app-only exercises a **different code path** from Apple Mail's
 **delegated** flow. It can prove EWS is up. It cannot prove a delegated client will work.
+
+### ⭐ The delegated probe — impersonate a real mail client's OAuth identity
+
+**This is the single best diagnostic for "client X can't connect but the tenant looks fine".**
+Third-party mail clients are registered as **public clients**, so you can run a **device code
+flow using the client's own app ID** and get a token with the client's own scopes. You are
+then making the exact call the failing client makes, and any failure is unambiguous.
+
+Verified working with Apple's app ID (macOS/iOS Mail):
+
+```python
+import msal, requests
+app = msal.PublicClientApplication(
+    "f8d98a96-0999-43f5-8af3-69971c7bb423",              # the CLIENT's app ID, not your own
+    authority="https://login.microsoftonline.com/<tenantId>")
+flow = app.initiate_device_flow(scopes=["https://outlook.office365.com/EWS.AccessAsUser.All"])
+print(flow["verification_uri"], flow["user_code"])       # user completes this in a browser
+tok = app.acquire_token_by_device_flow(flow)["access_token"]
+
+# delegated token IS the user - no ExchangeImpersonation header
+requests.post("https://outlook.office365.com/EWS/Exchange.asmx",
+    headers={"Authorization": f"Bearer {tok}", "Content-Type": "text/xml; charset=utf-8",
+             "X-AnchorMailbox": "<upn>"}, data=GETFOLDER_SOAP)
+```
+
+`200` + a `<t:FolderId>` means Exchange is fine for that client and the fault is client-side.
+Decode the token and check `scp` to confirm which scopes were actually granted.
+
+**Gotcha:** device code flow is **blocked tenant-wide** by the CA policy `Block device code
+flow`, with only `2fperez` and `2mhumora` excluded — so run it as one of those. `2mhumora`
+has **no mailbox**, so `2fperez` is the only usable identity for a mailbox probe. Confirm the
+probe account has `EwsEnabled=True` first, or a policy failure is indistinguishable from a
+missing mailbox.
