@@ -571,3 +571,122 @@ session: a policy read straight after a successful `200` returned every field at
 **old** value, and `New-DistributionGroup` reported `Members: []` and
 `HiddenFromAddressListsEnabled: False` when both had in fact been set. Poll until
 the value you wrote comes back; never judge a write by the read that follows it.
+
+---
+
+## EWS access control (`EwsAllowedAppIDs`) — retirement prep and its traps
+
+Exchange Online EWS is being retired: **phased disablement starts October 2026**, and
+EWS is **fully and permanently off on April 1, 2027**, no exceptions. Any client that
+talks EWS is on borrowed time. See
+[Deprecation of EWS in Exchange Online](https://learn.microsoft.com/exchange/clients-and-mobile-in-exchange-online/deprecation-of-ews-exchange-online).
+
+`EwsEnabled` has three states, and the default is not "stay as you are":
+
+| Value | Behaviour |
+|---|---|
+| `$true` | EWS enabled. From October 2026, **only** app IDs on the allowlist may call EWS. |
+| `$false` | EWS blocked tenant-wide; per-mailbox overrides are ignored. |
+| `$null` | Today's default. Microsoft **auto-flips this to `$false` on 2026-10-01** for any tenant that has not explicitly set `$true`. |
+
+TMBC is explicitly opted in (`EwsEnabled = True`) with a curated allowlist, so the
+October auto-switch does not apply. Microsoft pre-populates an allowlist from usage
+telemetry for tenants that never built one before September 2026 — that does **not**
+apply to us, we own ours.
+
+### Trap 1: the allowlist is invisible to a plain `Get-OrganizationConfig`
+
+`Get-OrganizationConfig | Select-Object Ews*` returns `EwsAllowList`, `EwsBlockList`,
+`EwsApplicationAccessPolicy` and friends — and **all of them are empty even when an
+app-ID allowlist is actively enforcing**. `EwsAllowedAppIDs` is a separate mechanism
+from the user-agent-based `EwsAllowList`/`EwsApplicationAccessPolicy` pair, and it only
+materialises with an explicit switch:
+
+```powershell
+Get-OrganizationConfig -RetrieveEwsOperationAccessPolicy | Format-List EwsAllowedAppIDs
+```
+
+Without `-RetrieveEwsOperationAccessPolicy` you will wrongly conclude no allowlist is
+configured and go hunting for a Conditional Access or licensing cause that isn't there.
+
+### Trap 2: it is ONE comma-joined string, not an array — naive writes wipe the list
+
+Three configured app IDs read back as a **single** array element containing commas, so
+`.Count` returns `1`, not `3`. `Set-OrganizationConfig -EwsAllowedAppIDs` also
+**overwrites wholesale** — there is no `@{Add=...}` syntax as there is for
+`EwsAllowList`. Passing just the ID you want to add silently removes every other app's
+EWS access. In this tenant that would break Veeam M365 backups and Mimecast.
+
+Always read-modify-write, flattening then splitting:
+
+```powershell
+$apple = 'f8d98a96-0999-43f5-8af3-69971c7bb423'
+$before = ((Get-OrganizationConfig -RetrieveEwsOperationAccessPolicy).EwsAllowedAppIDs -join ',')
+$before   # save this verbatim — it is the only rollback path
+
+$ids = ($before -split ',') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+if ($ids -notcontains $apple) {
+    Set-OrganizationConfig -EwsAllowedAppIDs (( @($ids) + $apple ) -join ',')
+}
+
+# verify — do not trust the write
+((Get-OrganizationConfig -RetrieveEwsOperationAccessPolicy).EwsAllowedAppIDs -join ',')
+```
+
+### Trap 3: a successful sign-in does NOT rule out an EWS block
+
+The allowlist is enforced **after** authentication. Entra records the sign-in as a clean
+success (`errorCode 0`, resource `Office 365 Exchange Online`) and the client then fails
+at the EWS authorisation layer. Users report "my password and MFA work but the app won't
+connect", and sign-in logs appear to exonerate the tenant. They don't.
+
+Find which app a user's client is actually presenting as:
+
+```bash
+az rest --method GET --url "https://graph.microsoft.com/v1.0/auditLogs/signIns?\$filter=userId eq '<objectId>'&\$top=200"
+# then group by appId / appDisplayName and compare against EwsAllowedAppIDs
+```
+
+### Diagnostic fingerprint: macOS mail breaks, iOS mail keeps working
+
+**macOS Apple Mail's "Microsoft Exchange" account type is EWS. iOS Mail is
+ActiveSync.** So an app-ID allowlist that omits Apple takes out Macs while iPhones and
+iPads carry on syncing normally. That asymmetry is the tell, and it is easy to misread as
+a device-specific or licensing problem.
+
+Confirm the protocol per device — `ClientType` is the field that matters:
+
+```powershell
+Get-MobileDevice -Mailbox user@themyersbriggs.com |
+  Select-Object DeviceModel,DeviceOS,DeviceType,ClientType,FirstSyncTime
+```
+
+`ClientType = EAS` for iPhone/iPad; a `DeviceType = Outlook` row with
+`DeviceModel = Mac` is Outlook for Mac, not Apple Mail.
+
+Apple Mail surfaces the rejection as **`The operation couldn't be completed.
+(com.apple.accounts error 3.)`**, and on an existing account as a generic "login failed,
+verify your username and password". Neither error names EWS. Note that an already
+configured account can keep working on a cached token for days after the allowlist
+changes — breakage appears when the token refreshes or the account is re-added, so the
+onset does not line up with the change date.
+
+Licensing is **not** a factor in this failure. It hits web-and-mobile-only SKUs
+(Business Basic) and full desktop SKUs (Business Premium, E3) identically. If a Mac user
+cannot connect Apple Mail, check the allowlist before checking their licence.
+
+### Known app IDs
+
+| App ID | Client |
+|---|---|
+| `f8d98a96-0999-43f5-8af3-69971c7bb423` | Apple Internet Accounts (macOS Mail, iOS Mail) |
+| `d3590ed6-52b3-4102-aeff-aad2292ab01c` | Microsoft Office / Outlook desktop (also the Skype desktop client ID) |
+| `49a117f9-f6d0-4056-891d-51f74a8c3b2d` | Veeam Backup for Microsoft 365 |
+| `b910823e-25d7-4238-aeea-9475a6aac850` | Mimecast |
+
+Do not copy an app ID from notes and assume it is right for a given tenant — read it out
+of the sign-in logs for the client that is actually failing.
+
+Ticket 101534 (2026-08-12): Apple Mail on macOS stopped connecting three days after the
+allowlist was introduced. Apple Internet Accounts was added to unblock it, accepting that
+macOS Mail dies with EWS in April 2027 regardless.
