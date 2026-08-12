@@ -633,12 +633,18 @@ if ($ids -notcontains $apple) {
 ((Get-OrganizationConfig -RetrieveEwsOperationAccessPolicy).EwsAllowedAppIDs -join ',')
 ```
 
-### Trap 3: a successful sign-in does NOT rule out an EWS block
+### Trap 3: a successful sign-in neither proves nor disproves an EWS block
 
-The allowlist is enforced **after** authentication. Entra records the sign-in as a clean
-success (`errorCode 0`, resource `Office 365 Exchange Online`) and the client then fails
-at the EWS authorisation layer. Users report "my password and MFA work but the app won't
-connect", and sign-in logs appear to exonerate the tenant. They don't.
+Any EWS authorization decision happens **after** authentication, so Entra can record a
+clean success (`errorCode 0`, resource `Office 365 Exchange Online`) while the client still
+fails. Users report "my password and MFA work but the app won't connect", and sign-in logs
+appear to exonerate the tenant.
+
+Read it in one direction only: a clean sign-in does **not** rule an EWS block out. It is
+equally **not** evidence that a block is present — plenty of post-auth failures have
+nothing to do with EWS authorization (see the ticket 101534 case study below, where the
+real cause was a broken Autodiscover endpoint). Use it to locate the *stage* of failure,
+never to name the cause.
 
 Find which app a user's client is actually presenting as:
 
@@ -647,12 +653,11 @@ az rest --method GET --url "https://graph.microsoft.com/v1.0/auditLogs/signIns?\
 # then group by appId / appDisplayName and compare against EwsAllowedAppIDs
 ```
 
-### Diagnostic fingerprint: macOS mail breaks, iOS mail keeps working
+### Protocol per device: macOS Apple Mail is EWS, iOS Mail is ActiveSync
 
 **macOS Apple Mail's "Microsoft Exchange" account type is EWS. iOS Mail is
-ActiveSync.** So an app-ID allowlist that omits Apple takes out Macs while iPhones and
-iPads carry on syncing normally. That asymmetry is the tell, and it is easy to misread as
-a device-specific or licensing problem.
+ActiveSync.** Useful to know, because an EWS-side change can take out Macs while iPhones
+and iPads carry on syncing normally.
 
 Confirm the protocol per device — `ClientType` is the field that matters:
 
@@ -664,16 +669,8 @@ Get-MobileDevice -Mailbox user@themyersbriggs.com |
 `ClientType = EAS` for iPhone/iPad; a `DeviceType = Outlook` row with
 `DeviceModel = Mac` is Outlook for Mac, not Apple Mail.
 
-Apple Mail surfaces the rejection as **`The operation couldn't be completed.
-(com.apple.accounts error 3.)`**, and on an existing account as a generic "login failed,
-verify your username and password". Neither error names EWS. Note that an already
-configured account can keep working on a cached token for days after the allowlist
-changes — breakage appears when the token refreshes or the account is re-added, so the
-onset does not line up with the change date.
-
-Licensing is **not** a factor in this failure. It hits web-and-mobile-only SKUs
-(Business Basic) and full desktop SKUs (Business Premium, E3) identically. If a Mac user
-cannot connect Apple Mail, check the allowlist before checking their licence.
+⚠️ **Do NOT read that asymmetry as proof the EWS allowlist is the cause.** It is
+suggestive at best. See the case study below, where exactly that inference was wrong.
 
 ### Known app IDs
 
@@ -683,10 +680,128 @@ cannot connect Apple Mail, check the allowlist before checking their licence.
 | `d3590ed6-52b3-4102-aeff-aad2292ab01c` | Microsoft Office / Outlook desktop (also the Skype desktop client ID) |
 | `49a117f9-f6d0-4056-891d-51f74a8c3b2d` | Veeam Backup for Microsoft 365 |
 | `b910823e-25d7-4238-aeea-9475a6aac850` | Mimecast |
+| `69de0375-242d-4b8a-94df-4e095ab81cea` | `claude-m365` (added 2026-08-12 for EWS diagnostics) |
 
 Do not copy an app ID from notes and assume it is right for a given tenant — read it out
 of the sign-in logs for the client that is actually failing.
 
-Ticket 101534 (2026-08-12): Apple Mail on macOS stopped connecting three days after the
-allowlist was introduced. Apple Internet Accounts was added to unblock it, accepting that
-macOS Mail dies with EWS in April 2027 regardless.
+---
+
+## Case study — `com.apple.accounts error 3`, and how NOT to diagnose it (ticket 101534)
+
+**2026-08-12.** Three users could not add a Microsoft Exchange account in macOS Apple Mail.
+Every one failed with `The operation couldn't be completed. (com.apple.accounts error 3.)`.
+It looked exactly like the EWS app-ID allowlist introduced three days earlier. **It was not.**
+
+### Root cause: `autodiscover.outlook.com` refusing TLS, globally
+
+Every Microsoft 365 tenant's `autodiscover.<domain>` CNAMEs to `autodiscover.outlook.com`.
+On that date it **accepted connections on port 80 but refused every connection on 443**, on
+every IP in the pool:
+
+```
+autodiscover.outlook.com      HTTP 000   all pool IPs: 443 DEAD, 80 OPEN
+autodiscover-s.outlook.com    HTTP 401   reachable
+outlook.office365.com         HTTP 401   reachable
+```
+
+Reproduced identically from a workstation on a residential ISP **and** from an AWS EC2 host
+in us-west-2. Two unrelated networks, so not tenant, ISP, or firewall. Microsoft-side.
+
+Autodiscover **V2** was unaffected and is the thing to test as a control:
+
+```bash
+curl "https://outlook.office365.com/autodiscover/autodiscover.json?Email=user@domain&Protocol=EWS&RedirectCount=3"
+# → {"Protocol":"EWS","Url":"https://outlook.office365.com/EWS/Exchange.asmx"}
+```
+
+### The false lead, and why it was convincing
+
+The allowlist went in on 08-09; Apple Mail broke on 08-11. Apple was absent from the list,
+iPhones (EAS) were unaffected, and sign-in logs showed authentication succeeding then the
+client failing — all consistent with an EWS authorization block. **Correlation only.**
+
+Two experiments killed it, and either would have killed it on day one:
+
+1. **Adding** `f8d98a96` to the allowlist changed nothing, after 25+ minutes.
+2. **Removing `EwsAllowedAppIDs` entirely** (`$null`) changed nothing either.
+
+**A cause you can add and remove with no change in symptom is not the cause.** Run the
+removal experiment early; it is one command and it is decisive.
+
+Supporting evidence that the retirement docs corroborate: *Prepare for EWS retirement*
+states app-ID enforcement begins **October 2026**, so a populated list may not be enforced
+at all before then.
+
+### Distinguishing pre-auth from post-auth failure — do this FIRST
+
+Apple's error dialog is identical for both, which hides the most important clue. Query
+sign-in logs per user, filtered to the Apple app ID:
+
+| Sign-in record exists? | Meaning |
+|---|---|
+| **No record at all** | Failed **before** authentication → Autodiscover / DNS / network |
+| Record with `errorCode 0` | Authenticated fine, failed **after** → EWS / authorization |
+
+In this incident one user had **zero** records while another had five clean ones, which
+proved they were failing at different stages and were never one shared cause. Chasing a
+single explanation for all three wasted most of the investigation.
+
+```bash
+az rest --method GET --url "https://graph.microsoft.com/v1.0/auditLogs/signIns?\$filter=appId eq 'f8d98a96-0999-43f5-8af3-69971c7bb423'&\$top=40"
+```
+
+Sign-in logs lag ~2 minutes. Do not treat a missing record as absent until that has passed.
+
+### Check the routing table before blaming the firewall
+
+An intermediate theory blamed the PAN. The routing table disproved it in one command — the
+GP tunnel carried only RFC1918 plus five specific public IPs, so Microsoft traffic egressed
+via the local ISP and never touched the PAN:
+
+```bash
+route -n get <ip>                        # iface + gateway for a specific destination
+netstat -rn -f inet | awk '$4 ~ /utun/'  # what the VPN actually carries
+```
+
+**Never resolve a hostname to IPs and then test those IPs later.** Microsoft's anycast
+pools rotate per query, so the addresses go stale within seconds and adjacency proves
+nothing. Test by hostname, resolving at connect time, and repeat several times.
+
+### Also ruled out (all clean — don't re-investigate blind)
+
+Internal DNS (both DCs, no override or stub zone), external DNS (matches internal),
+Conditional Access (`conditionalAccessStatus: success`, MFA satisfied), consent (tenant-wide
+`AllPrincipals` grant of `EAS.AccessAsUser.All EWS.AccessAsUser.All` covers every user),
+Application Access Policies (`Test-ApplicationAccessPolicy` → `Granted`), per-mailbox CAS
+settings, Client Access Rules (none), authentication policies (none default), Baseline
+Security Mode (would present as `EwsEnabled $false`).
+
+**Licensing is not a factor.** It hit Business Basic and Business Premium/E3 identically.
+Licence level only determines the *remedy* (Business Basic → Outlook on the web; desktop
+SKUs → Outlook for Mac), never whether the failure occurs.
+
+### Proving EWS itself is healthy (app-only probe)
+
+`claude-m365` holds `full_access_as_app` on Office 365 Exchange Online
+(`dc890d15-9560-4a4c-9b7f-a736ec74ec40`), granted 2026-08-12 by **direct
+`appRoleAssignment`** — never via admin-consent, which wipes that app's other permissions.
+⚠️ This is read/write to **every mailbox in the tenant** over EWS.
+
+Omit the impersonation header deliberately: the resulting fault proves EWS is alive and
+routing to a real backend, which is exactly what you want to establish.
+
+```
+ErrorInvalidExchangeImpersonationHeaderData
+"ExchangeImpersonation SOAP header must be present for this type of OAuth token."
+x-ms-appId: <appId>   X-CalculatedBETarget: <server>.namprd22.prod.outlook.com
+```
+
+**Unresolved:** *with* a valid `ExchangeImpersonation` header the same call returns `403`
+with an empty body and `Restrict-Access-Confirm: 1`, despite the role being present,
+`Test-ApplicationAccessPolicy` returning `Granted`, and the app being on the EWS allowlist.
+Not RAOP and not allowlist propagation (still failing after 13 min). Unexplained — do not
+assume this indicates a tenant misconfiguration.
+
+Note the probe's limit: app-only exercises a **different code path** from Apple Mail's
+**delegated** flow. It can prove EWS is up. It cannot prove a delegated client will work.
