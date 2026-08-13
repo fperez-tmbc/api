@@ -39,17 +39,26 @@ apps were folded in and hard-deleted on 2026-07-20 (registrations + SPs and thei
 - **SP Object ID:** `176b0e4e-4237-4381-bc4e-cbad24852ab6`
 - **Tenant:** `d5c15341-dfce-470a-bfdf-72c3dab91e7c` (themyersbriggs.com)
 - **Auth:** Certificate — key/cert at `~/GitHub/.tokens/claude-m365/`
-- **Current permissions (21 application roles, verified against the SP's `appRoleAssignments`
-  2026-07-30):** `Mail.Read`, `Mail.ReadWrite`; `DeviceManagementApps.Read.All`,
+- **Current permissions (26 Microsoft Graph application roles, verified against the SP's
+  `appRoleAssignments` 2026-08-13):** `Mail.Read`, `Mail.ReadWrite`; `DeviceManagementApps.Read.All`,
   `DeviceManagementApps.ReadWrite.All`, `DeviceManagementConfiguration.ReadWrite.All`,
   `DeviceManagementScripts.ReadWrite.All`, `DeviceManagementManagedDevices.Read.All`,
   `DeviceManagementServiceConfig.Read.All`, `DeviceLocalCredential.Read.All`;
   `Policy.Read.All`, `Policy.ReadWrite.ConditionalAccess`,
   `Policy.ReadWrite.AuthenticationMethod`, `UserAuthenticationMethod.ReadWrite.All`, `User.Read.All`,
-  `Group.ReadWrite.All`, `Application.Read.All`, `RoleManagement.ReadWrite.Directory`;
+  `Group.ReadWrite.All`, `Application.Read.All`, `RoleManagement.Read.Directory`;
   `OnPremisesPublishingProfiles.ReadWrite.All`; `AuditLog.Read.All`;
-  `SecurityIdentitiesSensors.ReadWrite.All` (added 2026-07-30). Plus Exchange: Recipient
-  Management role group + Exchange Administrator role.
+  `SecurityIdentitiesSensors.ReadWrite.All` (added 2026-07-30); `Files.ReadWrite.All`,
+  `LicenseAssignment.ReadWrite.All`, `ThreatSubmission.ReadWrite.All`;
+  `IdentityRiskyUser.Read.All`, `IdentityRiskEvent.Read.All`, `IdentityRiskyUser.ReadWrite.All`
+  (all three added 2026-08-13 for ID Protection alert triage). Beyond Graph the SP also holds
+  2 Office 365 Exchange Online roles, 3 Office 365 SharePoint Online roles, and 1
+  WindowsDefenderATP role (32 assignments total). Plus Exchange: Recipient Management role
+  group + Exchange Administrator role.
+
+  The earlier "21 roles" figure in this file was wrong — it undercounted and listed
+  `RoleManagement.ReadWrite.Directory` where the SP actually holds `RoleManagement.Read.Directory`.
+  Trust the live `appRoleAssignments` query below, never this prose list.
 
   **The app manifest (`requiredResourceAccess`) is NOT the source of truth** — it only declared
   10 of these. Always read the granted roles off the service principal:
@@ -93,6 +102,66 @@ ig=importlib.util.module_from_spec(importlib.util.spec_from_loader('igraph',load
 H={"Authorization":f"Bearer {ig.get_token()}"}
 requests.get("https://graph.microsoft.com/beta/deviceAppManagement/mobileApps?$top=999",headers=H)
 ```
+
+### `v1.0/auditLogs/signIns` returns INTERACTIVE sign-ins ONLY
+
+`v1.0` `/auditLogs/signIns` silently returns only `interactiveUser` events. Non-interactive,
+service-principal, and managed-identity sign-ins are simply absent — no error, no hint that
+the result set is partial. You also cannot filter for them on `v1.0`, because the property
+does not exist there:
+
+```
+$filter=signInEventTypes/any(t: t eq 'nonInteractiveUser')
+-> BadRequest: Could not find a property named 'signInEventTypes' on type 'microsoft.graph.signIn'
+```
+
+**Tell-tale symptom:** `user.signInActivity.lastNonInteractiveSignInDateTime` (or
+`lastSuccessfulSignInDateTime`) names a sign-in that appears nowhere in your
+`/auditLogs/signIns` results. That is the v1.0 filter hiding it, not a missing log.
+
+Hit 2026-08-13 while triaging an ID Protection alert. Use `beta` — either the inline-call
+pattern above, or:
+
+```bash
+az rest --method GET --url "https://graph.microsoft.com/beta/auditLogs/signIns?\$filter=userId eq '<guid>'"
+```
+
+### ID Protection risk is NOT reconstructable from sign-in logs
+
+`riskLevelDuringSignIn` / `riskState` on a signIn record only reflect risk scored **during a
+sign-in**. Several of the highest-severity detections never produce a sign-in record at all:
+
+- `userReportedSuspiciousActivity` — user tapped "No, it's not me" (source `EndUserReported`)
+- leaked credentials — offline detection, no sign-in involved
+
+So "which user does this *User at risk detected* email refer to?" **cannot** be answered from
+`/auditLogs/signIns`. On 2026-08-13 that approach surfaced a completely different user (an
+unrelated password-spray against a disabled ex-employee) and missed the real subject entirely.
+Query the detection directly:
+
+```bash
+igraph /identityProtection/riskDetections "\$filter=userId eq '<guid>'"
+igraph /identityProtection/riskyUsers "\$filter=riskState eq 'atRisk'"
+igraph "/identityProtection/riskyUsers/<guid>/history"     # prior risk + how it was remediated
+```
+
+Note the two scopes are **separate and both needed**: `IdentityRiskyUser.Read.All` lists risky
+*users*, `IdentityRiskEvent.Read.All` reads risk *detections* — and it is the detections
+endpoint that names the detection type, i.e. the actual answer.
+
+`/history` is worth checking too: it shows earlier risk on the account and how it cleared
+(e.g. `riskDetail: userChangedPasswordOnPremises`).
+
+### Dismissing a risky user takes NO reason/comment, and reads go stale
+
+`POST /identityProtection/riskyUsers/dismiss` accepts **only** `{"userIds":[...]}` — there is
+no reason, comment, or justification field, and the portal's "Dismiss user(s) risk" button is
+the same bare action. Any write-up of *why* a risk was dismissed has to live outside Entra
+(ticket, task tracker, repo). Requires `IdentityRiskyUser.ReadWrite.All`.
+
+It returns `204 No Content` and then **the read-back keeps showing the old `riskState` for
+minutes** (same stale-read behavior documented below). Do not report a dismissal as complete
+off the 204 alone — re-poll `riskyUsers/<guid>` until `riskState` flips to `dismissed`.
 
 ### winGetApp ("Microsoft Store app (new)") — install behavior is IMMUTABLE
 
