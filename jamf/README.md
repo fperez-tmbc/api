@@ -33,21 +33,24 @@ Content-Type: application/x-www-form-urlencoded
 client_id=...&client_secret=...&grant_type=client_credentials
 ```
 
-### Read the JSON blob field, NOT the standalone fields
+### If auth fails as `invalid_client`, check for id/secret drift
 
 The 1Password item carries three credential fields: `Client ID`, `Client secret`, and
-`client credentials` (a JSON blob Jamf gives you at client-creation time).
+`client credentials` (a JSON blob Jamf emits at client-creation time). **All three are
+consistent as of 2026-08-13** and either source works.
 
-**Use the `client credentials` blob.** On 2026-08-13 the standalone `Client ID` field was
-stale — it still held the id of a retired `automation (1)` client while `Client secret` held
-the *new* client's secret. That mismatched pair authenticates as:
+They can drift, though, and the failure is misleading. Briefly on 2026-08-13 the standalone
+`Client ID` still held the id of a retired `automation (1)` client while `Client secret` held
+the *new* client's secret. A mismatched pair fails as:
 
 ```json
 {"error": "invalid_client"}
 ```
 
-which reads like a bad secret and sends you looking in the wrong place. The blob is always a
-self-consistent `client_id` + `client_secret` pair because Jamf emits both together.
+which reads like a bad *secret* and sends you looking in the wrong place. When you see it,
+compare the standalone fields against the blob before assuming the secret is wrong — the blob
+is inherently self-consistent because Jamf emits both halves together. Rotating a secret or
+recreating the client is when drift gets introduced.
 
 ---
 
