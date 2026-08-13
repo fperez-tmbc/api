@@ -1,0 +1,137 @@
+#!/usr/bin/env python3
+"""
+jamf — Jamf Pro API CLI wrapper
+Uses the OAuth client-credentials API Client stored in ~/GitHub/.tokens/jamf.
+
+Usage:
+  jamf <path> [query]                       GET
+  jamf GET <path> [query]                   GET with explicit method
+  jamf POST <path> <json-body>              POST
+  jamf PUT <path> <json-body>               PUT
+  jamf PATCH <path> <json-body>             PATCH
+  jamf DELETE <path>                        DELETE
+
+Paths may be given with or without a leading /api:
+  jamf /v2/smtp-server          -> GET https://<tenant>/api/v2/smtp-server
+  jamf /api/v2/smtp-server      -> same
+  jamf /JSSResource/smtpserver  -> Classic API (returns XML unless Accept override)
+
+Examples:
+  jamf /v2/smtp-server
+  jamf PUT /v2/smtp-server '{"enabled":false,"authenticationType":"NONE", ...}'
+
+NOTE: the API Role for this client is scoped to ONLY "Read SMTP Server" and
+"Update SMTP Server". Every other endpoint will return 403 by design.
+"""
+
+import sys, json
+from pathlib import Path
+
+try:
+    import requests
+except ImportError:
+    print("Missing deps. Run: pip3 install requests --break-system-packages", file=sys.stderr)
+    sys.exit(1)
+
+TOKENS = Path.home() / "GitHub/.tokens/jamf"
+
+
+def load_creds():
+    if not TOKENS.exists():
+        print(f"Missing credentials file: {TOKENS}", file=sys.stderr)
+        sys.exit(1)
+    conf = {}
+    for line in TOKENS.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        conf[k.strip()] = v.strip().strip('"').strip("'")
+    for required in ("JAMF_URL", "JAMF_CLIENT_ID", "JAMF_CLIENT_SECRET"):
+        if required not in conf:
+            print(f"{TOKENS} is missing {required}", file=sys.stderr)
+            sys.exit(1)
+    return conf
+
+
+def get_token(conf):
+    # Jamf access tokens are VERY short-lived (~59s), so fetch one per invocation
+    # rather than caching to disk.
+    r = requests.post(
+        f"{conf['JAMF_URL']}/api/oauth/token",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        data={"client_id": conf["JAMF_CLIENT_ID"],
+              "client_secret": conf["JAMF_CLIENT_SECRET"],
+              "grant_type": "client_credentials"},
+        timeout=30,
+    )
+    try:
+        result = r.json()
+    except Exception:
+        print(f"Auth failed HTTP {r.status_code}: {r.text[:300]}", file=sys.stderr)
+        sys.exit(1)
+    if "access_token" not in result:
+        print("Auth error:", json.dumps(result, indent=2), file=sys.stderr)
+        sys.exit(1)
+    return result["access_token"]
+
+
+def main():
+    args = sys.argv[1:]
+    if not args or args[0] in ("-h", "--help"):
+        print(__doc__)
+        sys.exit(0)
+
+    METHODS = {"GET", "POST", "PATCH", "PUT", "DELETE"}
+    if args[0].upper() in METHODS:
+        method, args = args[0].upper(), args[1:]
+    else:
+        method = "GET"
+
+    if not args:
+        print("Error: path required.", file=sys.stderr)
+        sys.exit(1)
+
+    conf = load_creds()
+
+    path = args[0]
+    if not path.startswith("/"):
+        path = "/" + path
+    # Classic API keeps its own prefix; everything else lives under /api
+    if not path.startswith("/api/") and not path.startswith("/JSSResource"):
+        path = "/api" + path
+    url = f"{conf['JAMF_URL']}{path}"
+
+    body = None
+    if method in ("POST", "PATCH", "PUT") and len(args) > 1:
+        try:
+            body = json.loads(args[1])
+        except json.JSONDecodeError as e:
+            print(f"Invalid JSON body: {e}", file=sys.stderr)
+            sys.exit(1)
+    elif method == "GET" and len(args) > 1:
+        url = f"{url}?{args[1]}" if "?" not in url else f"{url}&{args[1]}"
+
+    headers = {
+        "Authorization": f"Bearer {get_token(conf)}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+
+    r = requests.request(method, url, headers=headers, json=body, timeout=60)
+
+    if r.status_code == 204:
+        print(f"HTTP {r.status_code} No Content")
+        return
+
+    try:
+        print(json.dumps(r.json(), indent=2))
+    except Exception:
+        print(f"HTTP {r.status_code}: {r.text}")
+
+    if not r.ok:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
