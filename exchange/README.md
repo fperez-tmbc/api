@@ -693,57 +693,67 @@ of the sign-in logs for the client that is actually failing.
 Every one failed with `The operation couldn't be completed. (com.apple.accounts error 3.)`.
 It looked exactly like the EWS app-ID allowlist introduced three days earlier. **It was not.**
 
-> ### ✅ CONCLUSION: the Exchange Online side is PROVEN GOOD. The fault is client-side.
+> ### ⚠️ A PASSING EWS PROBE DOES NOT EXONERATE THE TENANT
 >
-> Settled by acquiring a **delegated** EWS token using **Apple's own app ID** and making the
-> same call Apple Mail makes (recipe below). It returned **HTTP 200 with a FolderId**.
+> A **delegated** EWS token acquired using **Apple's own app ID**, making the same call Apple Mail
+> makes (recipe below), returned **HTTP 200 with a FolderId**:
 >
 > ```
 > appid=f8d98a96-0999-43f5-8af3-69971c7bb423   scp=EAS.AccessAsUser.All EWS.AccessAsUser.All
 > EWS GetFolder -> HTTP 200   X-CalculatedBETarget: LV8PR22MB4454.namprd22.prod.outlook.com
 > ```
 >
-> So EWS accepts Apple Internet Accounts, with Apple's exact scopes, in delegated context,
-> against this tenant. That rules out the allowlist, EWS availability, the app ID being
-> blocked, consent, and tenant policy **as a class**. Affected users also authenticate
-> cleanly (`errorCode 0`, CA success, MFA satisfied) and fail only afterwards.
+> ⛔ **This was read as "EWS accepts Apple Internet Accounts, so the allowlist, consent and tenant
+> policy are ruled out as a class." That conclusion was WRONG** — the allowlist *was* the cause
+> (see below). The probe passed because **the probe account had never attempted during the
+> outage**, so it had no poisoned per-user state. The failing users' accounts did.
 >
-> ⛔ **The "so the fault is client-side macOS Apple Mail" conclusion that used to sit here was
-> WRONG — see the correction below.** Exchange being exonerated does not mean the client is at
-> fault; DNS sits between them.
+> Keep the probe — it is still the best way to reproduce a client's exact call. Discard the
+> inference. **A probe result is only valid for the account you ran it as**, and with a per-user
+> cache that is a much narrower claim than "the tenant is fine."
 >
 > Scope caveat on the probe: it ran as a different mailbox (`2fperez`) than the affected users.
 > Their `Get-CASMailbox` settings were separately verified identical and clean, and the
 > tenant-wide consent grant covers all users, so it is representative of tenant policy — but it
 > is not literally their mailbox.
 
-> ### ⛔ CORRECTION — the cause was OUR DNS, not the client
+> ### ⛔ RESOLVED — the cause was THIS allowlist. Removing an app ID breaks it, ON A DELAY.
 >
-> Four causes were asserted during this investigation and the first three were wrong: the EWS
-> allowlist, the PAN firewall, and "client-side macOS Apple Mail." The actual leading candidate:
+> **`EwsAllowedAppIDs` excluded Apple Internet Accounts (`f8d98a96-…`) from 2026-08-09.** That is
+> the app ID macOS Apple Mail authenticates as, and at the time the tenant's **second-largest EWS
+> consumer**. Users could no longer add or re-add an Exchange account in Apple Mail. Adding the
+> app ID back was the fix.
 >
-> **An `_autodiscover._tcp` SRV record on our own domains, pointing at port 443 on
-> `autodiscover.outlook.com` — a port that deliberately does not listen.** That host exists to
-> serve a **port-80 302 redirect** to `autodiscover-s.outlook.com`, where the `*.outlook.com`
-> certificate matches the name the client connects to. Our SRV handed clients a dead endpoint.
-> Microsoft documents **only the CNAME** for M365 Autodiscover; the SRV was on-prem/hybrid-era
-> legacy and existed in **both** public and internal DNS. Deleting it from every zone and every
-> DNS server resolved it for the first user tested.
+> ⚠️ **The fix is invisible for 3 to 22 hours, per user.** Nobody recovered immediately. Recovery
+> time tracked when each user *first attempted* relative to the fix — one user attempted **three
+> minutes before** it and took longest, because he kept retrying and **retrying refreshes the bad
+> state**. A user who never attempted during the outage works immediately, so **a fresh test
+> account succeeding proves nothing**.
 >
-> **Attribution is not proven** — several DNS changes were bundled in the same window. This is
-> the leading candidate on mechanism, not a confirmed cause.
+> **Four wrong causes were asserted before this, and the first was this allowlist — correct, then
+> wrongly discarded.** It was "exonerated" by adding the app ID and then removing
+> `EwsAllowedAppIDs` entirely, with no change in symptom either way. That test was invalid:
+> **with a per-user cache in front of the mechanism, the toggle observes the cache, not the
+> mechanism.** Falsification only exonerates when you can bound the propagation and caching delay.
+> The same day had already produced two other delay traps — Exchange writes lagging their own
+> read-back, and Entra sign-in indexing exceeding five minutes.
 >
-> **The transferable error:** the app-only *and* delegated probes both proved Exchange was
-> healthy, and I read "Exchange is fine" as "therefore the client is broken." Ruling out the
-> server does not implicate the client. Discovery, DNS and the network all sit in between, and in
-> this case the fault was in a DNS record we owned.
+> **Second transferable error:** the app-only *and* delegated EWS probes both returned healthy
+> while real users were still failing, and that was read as "Exchange is fine, therefore the
+> client is broken." Ruling out the server does not implicate the client — and here the probe
+> passed only because the probe account had never attempted during the outage.
 >
-> Full write-up, including the reusable diagnostics and every dead end with evidence:
-> `knowledge-base/troubleshoot/apple-mail-exchange-autodiscover-srv-2026-08-12.md`
+> Full write-up with the reusable diagnostics and every dead end with evidence:
+> `knowledge-base/troubleshoot/apple-mail-ews-allowlist-2026-08-12.md`
 
-### Real but UNPROVEN as the cause: `autodiscover.outlook.com` refusing TLS, globally
+### NOT the cause, and not even a fault: `autodiscover.outlook.com` closed on 443
 
-⚠️ **This anomaly is real and reproducible, but it is NOT demonstrated to be the cause.**
+⚠️ **Port 443 being closed on `autodiscover.outlook.com` is correct, intended behaviour** — that
+host exists to serve the **port-80 302 redirect** to `autodiscover-s.outlook.com`, where the
+`*.outlook.com` certificate matches the name the client connects to. It was briefly mistaken for
+a global Microsoft outage. It is not one, and it had nothing to do with this incident. Recorded
+below so nobody else misreads it the same way.
+
 Every affected user authenticated successfully, which means their client got *past*
 discovery. Recorded because it is genuinely odd and independently verified, not because it
 explains the symptom.
