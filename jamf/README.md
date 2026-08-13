@@ -68,14 +68,18 @@ recreating the client is when drift gets introduced.
 
 Jamf needs a configured SMTP server for the Self Service **App Request** feature, so v2 guards
 *disabling* SMTP behind that feature's read privilege. The privilege is named exactly
-**`Read App Request Settings`** (verified against `/v1/api-role-privileges` on this tenant,
-which lists 524 privileges total; the only four matching SMTP or App Request are
-`Read SMTP Server`, `Update SMTP Server`, `Read App Request Settings`,
-`Update App Request Settings`).
+**`Read App Request Settings`**. Adding it to the role makes the v2 PUT succeed — confirmed
+2026-08-13 by the same call going 403 → 200 with no other change.
 
 Reading and updating SMTP need only the two SMTP privileges; it is specifically the transition
 to `enabled: false` that trips the check. Nothing in the `/v2/smtp-server` reference mentions
 this, only the runtime error.
+
+> **`/v1/api-role-privileges` lists the CATALOG, not your grants.** It returns all 524
+> privileges Jamf defines, regardless of what your role holds. A successful call proves only
+> that you can read the catalog. Do not read "the privilege appears in that list" as "my role
+> has it" — that mistake was made here on 2026-08-13. To see a role's actual grants, read
+> `/v1/api-roles` (needs its own privilege) or the console picker.
 
 **The Classic API has no such guard.** This works with only `Update SMTP Server`, and is how
 SMTP was actually disabled on 2026-08-13:
@@ -148,10 +152,17 @@ Config as found (now `enabled: false`):
                         "encryptionType": "TLS_1_2", "connectionTimeout": 5}}
 ```
 
-The stale credential is still *stored* (`authorization_required: true`, username intact); only
-the transport is off. That is deliberate — it keeps the change trivially reversible. To also
-clear the dead credential, PUT v2 with `authenticationType: NONE` (needs the App Request
-privilege) or overwrite the Classic `<username>`/`<password>` fields.
+Final state after cleanup on 2026-08-13 — transport off *and* the dead credential removed:
+
+```json
+{"enabled": false, "authenticationType": "NONE", "basicAuthCredentials": null}
+```
+
+Classic agrees: `authorization_required: false`, with `<username>` and `<password_sha256>`
+absent entirely. Done in two stages — Classic disabled the transport first (no App Request
+privilege needed), then v2 with `authenticationType: NONE` cleared the stored credential once
+`Read App Request Settings` was granted. `connectionSettings` is left intact, so re-enabling
+means flipping `enabled` and supplying fresh credentials.
 
 Per-notification checkboxes are **not** a fix: Jamf's docs note some notifications
 (CA expiration among them) are "enabled by default and cannot be disabled". Removing the
