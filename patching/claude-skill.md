@@ -118,7 +118,7 @@ while true; do
     # Wait for the automatic post-deployment scans. PDQ scans each machine as its
     # own step completes, so this normally converges well inside the window.
     SCAN_STALE_SQL="SELECT COUNT(DISTINCT ComputerId) FROM Computers WHERE Name IN ($CYCLE_IN) AND (SuccessfulScanDate IS NULL OR SuccessfulScanDate < '$STARTED')"
-    for i in $(seq 1 10); do
+    for i in $(seq 1 30); do
         PENDING_SCANS=$(pdq_ssh "$PDQ_SQLITE \"$PDQ_INV_DB\" \"$SCAN_STALE_SQL\"")
         log "Machines not yet rescanned: $PENDING_SCANS"
         if [[ "$PENDING_SCANS" == "0" ]]; then break; fi
