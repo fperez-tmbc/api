@@ -22,24 +22,27 @@ The key is authorized via `C:\ProgramData\ssh\administrators_authorized_keys`, w
 applies to **any member of the local Administrators group**. `CPP-DB\Domain Admins` is a member, so the
 same Mac key logs in as the domain DA. Confirm with `whoami` → must print `cpp-db\ntsupport`.
 
-### You MUST domain-qualify the username — it fails HALF-WAY, not cleanly
+### Domain-qualify the username anyway
 
-There is also a **local** `ntsupport` account on this host (RID 1001, password last set 2016-09-20,
-unrelated to the 2026-07 local-admin standardization, which standardized `Administrator` at RID 500 and
-left this one alone). It is enabled and a member of local Administrators, so the **same key** in
-`administrators_authorized_keys` matches it.
+Since **2026-08-15 this host has no local accounts other than `Administrator`** (all disabled built-ins
+aside), so a bare `ntsupport@SVPDQHQ01.cpp-db.com` now resolves straight to the domain account and works.
+Keep using the qualified form regardless — it is explicit, and it is the only form that stays correct if a
+same-named local account is ever recreated here or the pattern is copied to another host.
 
-A bare `ntsupport@SVPDQHQ01.cpp-db.com` therefore logs you in as **`SVPDQHQ01\ntsupport`** — and because
-that is a local admin, Deploy's `BUILTIN\Administrators` entry lets the **Deploy CLI succeed** while the
-**Inventory CLI is denied**. Confirmed 2026-08-15: `GetPackageNames` returned all 407 packages, and
-`GetAllCollections` returned `Access denied`. A script that forgets the domain suffix will fire
-deployments and then fail on Inventory steps, which is worse than a clean auth failure.
+**Why this matters historically.** Until 2026-08-15 there was also a *local* `ntsupport` (RID 1001,
+password last set 2016-09-20; the 2026-07 local-admin standardization standardized `Administrator` at
+RID 500 and deliberately left this one alone). It was an enabled local admin, so the **same key** in
+`administrators_authorized_keys` matched it, and a bare username silently produced a **local** token.
+That failed *half-way*: Deploy's `BUILTIN\Administrators` entry let the **Deploy CLI succeed** (all 407
+packages returned) while the **Inventory CLI was denied** — so a script missing the suffix would fire
+deployments and only then fail on Inventory steps. Frank deleted the account, its profile, and the
+orphaned `ProfileList` entries on 2026-08-15.
 
-Always `ntsupport@cpp-db.com@<host>` (or `cpp-db\ntsupport@<host>`), and assert on `whoami` returning
-`cpp-db\ntsupport` before doing anything else.
+**The same collision still exists on five other hosts** carrying a local `ntsupport` from the same era:
+`SVAZADSYNCDC01`, `SVSTAFFDEMODC01`, `SVSTAFFDEVDC01`, `SVSTAFFQADC01`, `SVSTAFFQADC02`. Domain-qualify
+there too, or expect the same half-working failure.
 
-Two profiles exist and are easy to confuse — `C:\Users\ntsupport` is the **domain** account (SID …-500),
-`C:\Users\ntsupport.SVPDQHQ01` is the **local** one (SID …-1001).
+Assert on `whoami` returning `cpp-db\ntsupport` before doing anything consequential.
 
 ### Capabilities — full access as `cpp-db\ntsupport`
 
