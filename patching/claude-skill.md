@@ -131,13 +131,17 @@ while true; do
     # became reachable 2026-08-15, so force a scan on the stragglers and block.
     if [[ "$PENDING_SCANS" != "0" ]]; then
         STALE_MACHINES=("${(@f)$(pdq_ssh "$PDQ_SQLITE \"$PDQ_INV_DB\" \"SELECT DISTINCT Name FROM Computers WHERE Name IN ($CYCLE_IN) AND (SuccessfulScanDate IS NULL OR SuccessfulScanDate < '$STARTED') ORDER BY Name\"")}")
-        log "Forcing rescan of ${#STALE_MACHINES[@]} machine(s): ${STALE_MACHINES[*]}"
-        pdq_ssh "$PDQ_INVENTORY ScanComputers -Computers ${STALE_MACHINES[*]} -Wait -Quiet -Timeout 900" >/dev/null
-        PENDING_SCANS=$(pdq_ssh "$PDQ_SQLITE \"$PDQ_INV_DB\" \"$SCAN_STALE_SQL\"")
-        if [[ "$PENDING_SCANS" == "0" ]]; then
-            log "Forced rescan complete - Inventory is current."
+        if [[ ${#STALE_MACHINES[@]} -eq 0 ]]; then
+            log "WARNING: stale count was '$PENDING_SCANS' but no stale machines resolved (query returned nothing?) - skipping forced rescan."
         else
-            log "WARNING: $PENDING_SCANS machine(s) still stale after a forced rescan; reboot state for those may be wrong."
+            log "Forcing rescan of ${#STALE_MACHINES[@]} machine(s): ${STALE_MACHINES[*]}"
+            pdq_ssh "$PDQ_INVENTORY ScanComputers -Computers ${STALE_MACHINES[*]} -Wait -Quiet -Timeout 900" >/dev/null
+            PENDING_SCANS=$(pdq_ssh "$PDQ_SQLITE \"$PDQ_INV_DB\" \"$SCAN_STALE_SQL\"")
+            if [[ "$PENDING_SCANS" == "0" ]]; then
+                log "Forced rescan complete - Inventory is current."
+            else
+                log "WARNING: $PENDING_SCANS machine(s) still stale after a forced rescan; reboot state for those may be wrong."
+            fi
         fi
     fi
 
