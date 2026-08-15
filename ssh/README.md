@@ -169,6 +169,41 @@ Use this pattern any time you see:
 
 ---
 
+
+## An SSH session has NO network credentials (the double-hop)
+
+A Windows OpenSSH session is a **network logon**. The token can act locally but carries nothing to present
+to a *third* host, so anything that reaches off-box from inside the session fails with an access error even
+though you are a Domain Admin. Verified 2026-08-15 on SVPDQHQ01 as `cpp-db\ntsupport`:
+
+| From inside an SSH session | Result |
+|---|---|
+| `net user <name> /domain` | **System error 5 — Access is denied** |
+| `[ADSI]`/`DirectorySearcher` LDAP query | **"An operations error occurred"** |
+| `nltest /dsgetdc:` | works (no credential needed) |
+| Local reads, local EXEs, local SQLite | work |
+
+**The trap:** `DirectorySearcher.FindOne()` throwing leaves `$res` null, so a naive script prints "not
+found" and you conclude the object does not exist. It does — you simply could not ask. **Always run a
+control query for an object you know exists before believing an empty AD result.**
+
+**Fixes, in order of preference:**
+1. **SSH directly to a DC** and run `Get-ADUser`/`Get-ADComputer` natively — `ntsupport@cpp-db.com@svdcdc01.cpp-db.com`.
+2. Pass an **explicit credential** to the cmdlet (`-Credential`), which supplies its own network identity.
+3. `net use \\TARGET\C$ /user:... ` first to establish the session (see `api/psexec/README.md`).
+
+## `administrators_authorized_keys` authorises ANY local admin
+
+Windows OpenSSH reads `C:\ProgramData\ssh\administrators_authorized_keys` for **every member of the local
+Administrators group**, not per-user. One key there logs you in as *any* admin account you name — local or
+domain. On SVPDQHQ01 that file holds the Mac key and the VM key, which is why key auth works for
+`cpp-db\ntsupport` without a per-user `authorized_keys`.
+
+**Consequence — always domain-qualify the username.** A bare `user@host` can silently land on a *local*
+account of the same name via that same key. Use `user@domain.com@host` (or `domain\user@host`) and assert
+on `whoami` before doing anything consequential. This bit us on PDQ: a local token drives the PDQ **Deploy**
+CLI fine while PDQ **Inventory** denies it, so the wrong identity fails *half-way* rather than cleanly.
+
 ## End User Laptops
 
 > **Stale-note correction (2026-08-05):** this section previously used `svcclaude`. That AD identity

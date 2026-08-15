@@ -130,11 +130,15 @@ ssh -n -q -i "$SSH_KEY" \
 
 | Table | Key columns |
 |---|---|
-| `Computers` | `ComputerId`, `Name`, `NeedsReboot`, `SuccessfulScanDate` |
+| `Computers` | `ComputerId`, `Name`, `NeedsReboot`, `SuccessfulScanDate`, `ADDomain`, `ADIsDisabled` |
 | `Collections` | `CollectionId`, `Name` |
 | `CollectionComputers` | `ComputerId`, `CollectionId` |
 
 Use `SELECT DISTINCT` on collection membership queries — machines can belong to multiple sub-collections.
+
+**`ADDomain` is the clean machine → domain map.** Use it instead of DNS guessing when a task needs
+per-domain credentials. The estate is genuinely mixed: DEV/QA/VDI alone is 34 `cpp-db.com`, 2 `opp.local`,
+3 `oppnewapp.local`, and Web Staggered - Group 1 is 1 `cpp-db.com` + 2 `cpp-web.com`.
 
 ### List members of a collection
 
@@ -496,6 +500,34 @@ ssh -n -q -i "$SSH_KEY" \
 ```
 
 Always include `$ProgressPreference = 'SilentlyContinue'` at the top of the script — PowerShell emits CLIXML/progress noise over non-interactive SSH sessions without it.
+
+---
+
+## Diagnostic traps that cost time (2026-08-15)
+
+**sqlite3 against a wrong path returns empty and exit 0 — silently.** No "file not found", just no rows.
+Querying `sqlite_master` and getting nothing means *check the path first*, not "the table is missing". The
+DBs live under `C:\ProgramData\Admin Arsenal\...`, the `sqlite3.exe` under `C:\Program Files (x86)\...` —
+mixing them up produces a convincing empty result.
+
+**PDQ Deploy and PDQ Inventory services are Automatic (Delayed Start).** After a reboot they read `Stopped`
+for roughly 2.5 minutes and then come up on their own — SVPDQHQ01 booted 09:36:51 and the services started
+09:39:15 and 09:39:18. Do not diagnose a fault in that window.
+
+**Reboot completion is a changed `LastBootUpTime`, not SSH connectivity.** sshd keeps answering well into
+the shutdown sequence, so "SSH responded" is a false 'it came back'. This produced two wrong calls in one
+session. Capture the boot time first, then poll until it *differs*:
+
+```bash
+getboot(){ ssh ... "$HOST" 'powershell -NoProfile -Command "(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToString(\"MM/dd/yyyy HH:mm:ss\")"' | tr -d '\r\n'; }
+```
+
+**A large CU reboots twice.** The second restart is initiated by `TrustedInstaller.exe` ("Operating System:
+Upgrade (Planned)") to finish component servicing, several minutes after the first boot. Between the two,
+every cheap signal reads "done" — see the Event 19 note in `api/patching/`.
+
+**`ScanComputers` without `-Quiet` floods an SSH stream.** It emits a per-second progress spinner that will
+run a tool call to its timeout. `-Quiet` requires `-Wait`.
 
 ---
 

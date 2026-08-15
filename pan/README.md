@@ -1,14 +1,37 @@
 # PAN-OS XML API Field Notes
 
-> ## ℹ️ `svcclaude` on PAN-OS is NOT affected by the AD decommission
+> ## ⚠️ `svcclaude` on PAN is NOT a local account — do not delete the AD object
 >
-> The **AD account** `CPP-DB\svcclaude` was decommissioned 2026-08-02, but PAN firewalls keep their
-> own local user database, so the identically-named **PAN-OS local account is still valid**.
-> Verified 2026-08-02 against AVSPAN01 and WHPAN01 — key auth succeeded and returned the
-> `svcclaude@AVSPAN01(active)>` prompt.
+> **Corrected 2026-08-15.** This block previously said PAN "keeps its own local user database, so the
+> identically-named PAN-OS local account is still valid." **That is wrong**, and the wrong reason is the
+> dangerous part: it reads as "PAN is independent of AD", which makes deleting the AD object look safe.
+>
+> Read live from all four firewalls (AVSPAN01, WHPAN01, AUPAN01, FRPAN01) — the admin entry is identical
+> on each and has **no `phash`** (querying it returns code 7, object not present), i.e. **no local
+> password**:
+>
+> ```xml
+> <entry name="svcclaude">
+>   <permissions><role-based><superuser>yes</superuser></role-based></permissions>
+>   <authentication-profile>MGMT_AUTH_PROFILE</authentication-profile>
+>   <public-key>…</public-key>
+> </entry>
+> ```
+>
+> `MGMT_AUTH_PROFILE` is **LDAP → server-profile `CPP-DB.COM`**, `login-attribute sAMAccountName`, with
+> `cpp-db\svcclaude` named literally in its allow-list. So password auth for a **superuser** on all four
+> firewalls resolves against Active Directory.
+>
+> What actually survived the 2026-08-02 AD strip was **SSH key auth**, because the public key is stored on
+> the device. That is why key auth kept working and was mistaken for a local account.
+>
+> **Consequences if the AD object is ever deleted:** key auth keeps working; password auth for a superuser
+> breaks on all four firewalls, and `type=keygen` (API key regeneration) breaks with it. Existing API keys
+> are unaffected until they need reissuing.
 >
 > **Keep using `~/GitHub/.tokens/svcclaude-key` (ed25519) and `svcclaude-key-rsa` (RSA 4096).**
-> Nothing in this document needs to change. Do not "fix" it by swapping in an AD account.
+> That advice was always right — only the stated reason was wrong. Do not "fix" it by swapping in an
+> AD account, and do not delete `CN=svcclaude,OU=Service Accounts,OU=Users,OU=TheMBC,DC=cpp-db,DC=com`.
 
 
 
