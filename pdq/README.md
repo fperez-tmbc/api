@@ -96,7 +96,8 @@ populate `Console` instead), so CLI use is distinguishable from GUI use in the a
 
 ### AD sync / disabled computers
 - `Computers.ADIsDisabled` is a **string** (`'Enabled'` / `'Disabled'`), NOT `1/0`. Filter with `WHERE ADIsDisabled='Disabled'`.
-- **AD Sync does not delete *disabled* computers** — it only removes computers no longer present in the synced AD scope. In practice all inventory machines show `Enabled` (the sync scope excludes disabled accounts), so a decommissioned/disabled machine is dropped when the scheduled AD sync re-reads it, or delete it manually in the console. SVPRINTHQ01 was already gone this way; SVFSAU01 will drop on the next sync (or manual delete).
+- **AD Sync does not delete *disabled* computers** — it only removes computers no longer present in the synced AD scope. In practice all inventory machines show `Enabled` (the sync scope excludes disabled accounts), so a decommissioned/disabled machine is dropped when the scheduled AD sync re-reads it. SVPRINTHQ01 was already gone this way; SVFSAU01 will drop on the next sync.
+- Both halves of that are now scriptable rather than GUI-only: `PDQInventory ADSync -StartSync` forces the sync, and `PDQInventory DeleteComputers -Computers <name>` removes a machine directly.
 
 ---
 
@@ -253,7 +254,7 @@ done
 ```
 
 **Note the vendor docs assume an elevated local shell and the install dir on `PATH`** (`PDQDeploy <cmd>`).
-Over SSH as `claude` that PATH assumption does not hold — always use the full quoted EXE path.
+Over SSH that PATH assumption does not hold — always use the full quoted EXE path.
 
 ---
 
@@ -296,8 +297,9 @@ All verified present via `PDQDeploy.exe Help` on SVPDQHQ01. **Ent** = Enterprise
 
 ## PDQ Inventory CLI — full command list (20.1.8.0)
 
-**All of these are blocked for `claude` except `SystemInfo`** (see capabilities above). Listed for when
-Frank runs them from an elevated console session.
+**All of these work** over SSH as `cpp-db\ntsupport`, verified 2026-08-15. They were entirely inaccessible
+until the account switch, so anything written before then that says "use SQLite instead" is stale — prefer
+the CLI where it is a better fit (see the notes under the table).
 
 | Command | Lic | Purpose |
 |---|---|---|
@@ -330,15 +332,51 @@ Frank runs them from an elevated console session.
 | `SetServiceMode` | Ent | Local / Client / Server mode |
 | `Settings` | Free | Read/write internal settings |
 | `StartNetworkDiscovery` / `StopNetworkDiscovery` | Ent | Network discovery (one at a time) |
-| `SystemInfo` | Free | **The only Inventory command `claude` can run** |
+| `SystemInfo` | Free | Version, DB path, service mode, licence |
 | `WakeComputer` | Ent | Send Wake-on-LAN |
+
+### Inventory CLI vs SQLite — which to use
+
+SQLite is still the better tool for **arbitrary queries and joins** (pending reboots, scan freshness,
+cross-collection filtering) because the CLI has no query language. Use the CLI where it does something
+SQLite cannot:
+
+| Need | Use |
+|---|---|
+| Ad-hoc filtering / joins / counts | **SQLite** — no CLI equivalent |
+| Collection membership | either; they agree (46 for PROD, cross-checked) |
+| **Force a rescan and wait for it** | **`ScanComputers -Wait`** / `ScanCollections -Wait` — no SQLite equivalent |
+| **Trigger an AD sync** | **`ADSync -StartSync`** — previously GUI-only |
+| **Delete decommissioned computers** | **`DeleteComputers`** — previously GUI-only |
+| Wake a machine before patching | **`WakeComputer`** |
+| Fire an auto report | **`RunAutoReport -Wait`** |
+| Back up collections before editing | **`ExportCollections`** |
+
+`ScanComputers -Wait` matters most for the patch flow: step 4 currently polls `SuccessfulScanDate` in a
+loop, and `-Wait` replaces that polling with a blocking call.
+
+**Gotcha — `-Json`, `-Csv`, `-Quiet` and `-Timeout` all REQUIRE `-Wait`** on `ScanComputers` /
+`ScanCollections`. Without it the command just queues the scan and returns, so there is nothing to format
+or time out. Verified via `Help ScanComputers` on 20.1.8.0:
+
+```
+ScanComputers [[-ScanProfile] string] [-Brief] [-Computers string+] [-Csv] [-IgnoreNotFound]
+              [-Json] [-Quiet] [-Timeout integer] [-Wait]
+```
+
+32 scan profiles are defined on our box; list them with `GetAllScanProfiles`. `Standard` and
+`TheMBC - Standard (-Hotfixes)` / `(-Printers)` are the general-purpose ones.
+
+**Writes are audited.** RBAC (20.0.5.0+) gates CLI actions and the audit log attributes them to the calling
+user, now `cpp-db\ntsupport` rather than a local account — so Inventory changes are traceable to a real
+identity for the first time.
 
 ---
 
 ## `GetDeploymentStatus` — replaces SQLite polling
 
-**This is the single biggest win from 20.x for our patching flow.** It works as `claude`, returns proper
-exit codes, and emits JSON — so deployment polling no longer needs a SQLite query.
+**This is the single biggest win from 20.x for our patching flow.** It returns proper exit codes and emits
+JSON, so deployment polling no longer needs a SQLite query.
 
 ```
 GetDeploymentStatus { -Id <id[,id,...]> | -Name <pkg> | -PackageId <id> | -Running | -Status <s> | -Since <v> }
@@ -432,8 +470,8 @@ Deploy [-Package] <string> -Targets <string+> [-UserName <credentials>] [-Notifi
 ### Gotchas
 
 **PDQ Deploy CLI has no `-Collection` flag.** Resolve collection members via SQLite and pass machine names
-individually via `-Targets`. The Inventory `GetCollectionComputers` command would do this, but it is blocked
-for `claude` — see capabilities above.
+individually via `-Targets`. Resolve them with either `PDQInventory GetCollectionComputers "<name>"` or the
+SQLite join below — both work and agree (46 for PROD, cross-checked 2026-08-15).
 
 **`Deploy` documents only exit code 0.** Per `Help Deploy`, success is the sole documented code, so it
 returns exit 0 even on package-not-found. Always check output text for `not found`, `error`, or `failed`.
