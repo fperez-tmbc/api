@@ -3,7 +3,7 @@ Patch the PDQ collection specified in `$ARGUMENTS` using the correct flow (F5 or
 ## On Invocation
 
 1. Read `/Users/fperez2nd/GitHub/api/patching/collections.md` to determine if the collection requires F5 commands and which config key to use.
-2. Source `~/GitHub/.tokens/patching` for `$PDQ_PASS` and `$F5_PASS`.
+2. Source `~/GitHub/.tokens/patching` for `$F5_PASS`. SSH to SVPDQHQ01 is key auth as `ntsupport@cpp-db.com` — no password needed.
 3. Run the patch job autonomously in the background — no waiting for user prompts between steps.
 
 ---
@@ -57,7 +57,8 @@ curl -sk -u "admin:${F5_PASS}" -X PATCH \
 4. Wait 20 min if CU found, 5 min if not
 
 ```zsh
-source ~/GitHub/.tokens/patching
+source ~/GitHub/.tokens/patching   # F5_PASS only; PDQ SSH is key-based
+if [[ -f ~/.ssh/id_ed25519_pdq ]]; then SSH_KEY=~/.ssh/id_ed25519_pdq; else SSH_KEY=~/.ssh/id_ed25519; fi
 
 PDQ_DEPLOY='"C:\Program Files (x86)\Admin Arsenal\PDQ Deploy\PDQDeploy.exe"'
 PDQ_DEPLOY_DB='C:\ProgramData\Admin Arsenal\PDQ Deploy\Database.db'
@@ -68,10 +69,10 @@ REBOOT_PKG="Reboot"
 # COLLECTION must be set before running
 
 pdq_ssh() {
-    SSHPASS="$PDQ_PASS" sshpass -e ssh -n -q \
+    ssh -n -q -i "$SSH_KEY" \
         -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         -o ConnectTimeout=15 \
-        "claude@SVPDQHQ01.cpp-db.com" "$1" | tr -d '\r'
+        "ntsupport@cpp-db.com@SVPDQHQ01.cpp-db.com" "$1" | tr -d '\r'
 }
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
@@ -165,10 +166,10 @@ foreach (\$row in \$rows) {
 }
 Write-Output 'NO_CU'"
     ENCODED=$(printf '%s' "$PS_SCRIPT" | iconv -t UTF-16LE | base64 | tr -d '\n')
-    CU_RESULT=$(SSHPASS="$PDQ_PASS" sshpass -e ssh -n -q \
+    CU_RESULT=$(ssh -n -q -i "$SSH_KEY" \
         -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         -o ConnectTimeout=15 \
-        "claude@SVPDQHQ01.cpp-db.com" \
+        "ntsupport@cpp-db.com@SVPDQHQ01.cpp-db.com" \
         "powershell -NonInteractive -NoProfile -EncodedCommand ${ENCODED}" | tr -d '\r')
     log "CU check: $CU_RESULT"
 

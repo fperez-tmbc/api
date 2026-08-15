@@ -5,24 +5,50 @@
 ## Connection
 
 - **Server:** `SVPDQHQ01.cpp-db.com`
-- **SSH user:** `claude`
-- **Credentials:** `~/GitHub/.tokens/patching` — source this file; use `$PDQ_PASS`
+- **SSH user:** `ntsupport@cpp-db.com` — the **domain** DA. Must be domain-qualified (see below).
+- **Auth:** SSH **key**, no password. `~/.ssh/id_ed25519_pdq` if present, else `~/.ssh/id_ed25519`.
+- **Password fallback (rarely needed):** `~/GitHub/.tokens/kv-get.sh da-cpp-db-com`
 
 ```bash
-source ~/GitHub/.tokens/patching
-SSHPASS="$PDQ_PASS" sshpass -e ssh -n -q \
+SSH_KEY=~/.ssh/id_ed25519          # or ~/.ssh/id_ed25519_pdq
+ssh -n -q -i "$SSH_KEY" \
     -o StrictHostKeyChecking=no \
     -o UserKnownHostsFile=/dev/null \
-    "claude@SVPDQHQ01.cpp-db.com" "<command>"
+    -o ConnectTimeout=15 \
+    "ntsupport@cpp-db.com@SVPDQHQ01.cpp-db.com" "<command>" | tr -d '\r'
 ```
 
-### `claude` account — capabilities & limits
-- **Read-only SQLite + PDQ Deploy only.** The `claude` account can query the Inventory/Deploy DBs directly (sqlite3) and run the **entire PDQ Deploy CLI** — verified against 20.1.8.0, including the newer `GetDeploymentStatus`, `GetPackageNames`, `GetSchedules`, `SystemInfo`, and `Help`.
-- **The ENTIRE PDQ Inventory CLI is BLOCKED — including read-only commands.** `ADSync`, `DeleteComputers`, `ScanComputers`, and also `GetAllCollections`, `GetCollectionComputers`, `GetAllComputers`, `GetOnlineComputers` all return:
-  `Access denied to PDQ Inventory background service. Contact your system administrator to add SVPDQHQ01\claude to Console Users`
-  Everything except `PDQInventory SystemInfo` (which reads local install metadata, not the service) hits this wall.
-- **Consequence:** the 20.0.22.0 Inventory read commands give `claude` no shortcut. **SQLite remains the only way to read Inventory _as `claude`_.** Do not rewrite collection lookups to use `GetCollectionComputers` in the `claude` code path.
-- **Not granted on purpose:** a PDQ Inventory **Console User consumes a license** (Frank, 2026-07-21), so `claude` is intentionally left out. Don't propose adding `claude` to Console Users.
+The key is authorized via `C:\ProgramData\ssh\administrators_authorized_keys`, which Windows OpenSSH
+applies to **any member of the local Administrators group**. `CPP-DB\Domain Admins` is a member, so the
+same Mac key logs in as the domain DA. Confirm with `whoami` → must print `cpp-db\ntsupport`.
+
+### You MUST domain-qualify the username
+
+There is also a **local** `ntsupport` account on this host (RID 1001, created 2016-09-20, unrelated to the
+2026-07 local-admin standardization). A bare `ntsupport@SVPDQHQ01.cpp-db.com` matches the same global key
+file and logs you in as **`SVPDQHQ01\ntsupport`** — a local token, which Inventory then denies. Use
+`ntsupport@cpp-db.com@<host>` (or `cpp-db\ntsupport@<host>`) and verify with `whoami`.
+
+### Capabilities — full access as `cpp-db\ntsupport`
+
+Verified end-to-end 2026-08-15 against 20.1.8.0 with key auth:
+
+| Capability | Status |
+|---|---|
+| PDQ Deploy CLI (all commands) | ✅ |
+| PDQ Inventory CLI (all commands) | ✅ |
+| SQLite reads on both DBs | ✅ |
+| `powershell -EncodedCommand` (gzip log reads) | ✅ |
+
+Cross-check that both read paths agree: SQLite and `GetCollectionComputers "PROD"` both return **46**.
+
+**No licence cost.** `cpp-db\ntsupport` was already in Inventory's `LicensedUser` table; the count stayed
+at 7 after the switch.
+
+> **History:** this used to run as the local `SVPDQHQ01\claude` account, which could use the Deploy CLI but
+> was denied the **entire** Inventory CLI (including read-only verbs), leaving SQLite as the only Inventory
+> read path. That account was **deleted 2026-08-15** in favour of `cpp-db\ntsupport`. Deploy's CLI worked for
+> it only because Deploy's `ConsoleUsers` includes `BUILTIN\Administrators`, which Inventory's does not.
 
 ### Console User access is by AD GROUP, not per-account
 
@@ -33,35 +59,22 @@ The `ConsoleUsers` table holds **groups**, not users:
 | `CPP-DB\netops` | Group | `-2536` |
 | `CPP-DB\Domain Admins` | Group | `-512` |
 
-`SVPDQHQ01\claude` is a **local** account, so it can never match either group — that is the whole reason
-for the denial. It is not a per-account setting anyone forgot to flip.
+Any **local** account is therefore permanently excluded, which is why `SVPDQHQ01\claude` was denied. It was
+never a per-account setting anyone forgot to flip.
 
-### The Inventory CLI DOES work under a domain token (no licence cost)
+**Deploy is asymmetric:** Deploy's own `ConsoleUsers` table adds a third entry, `BUILTIN\Administrators`.
+That is the sole reason the local `claude` account could drive the Deploy CLI while being locked out of
+Inventory. Inventory has no equivalent entry.
 
-Verified 2026-08-15: running as `cpp-db\ntsupport` (the Key Vault DA) unblocks the **entire** Inventory CLI
-with no config change and **no new licence seat** — `LicensedUser` stayed at 7.
+**Licence model:** `LicensedUser` tracks **named users** (7: `2fperez`, `2bcampbell`, `2lbejnar`,
+`2rceglarz`, `jelgin`, `ntsupport`, `rceglarz`). Reusing an identity already in that table costs nothing;
+only a **new** identity consumes another seat. Purchased seat count is not stored in the DB — check the PDQ
+account portal. Note Deploy's `LicensedUser` never listed `claude` despite hundreds of deployments, so
+CLI use by a local admin was not licence-counted there.
 
-```bash
-DA_PASS=$(~/GitHub/.tokens/kv-get.sh da-cpp-db-com)
-SSHPASS="$DA_PASS" sshpass -e ssh -n -q \
-    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-    -o PreferredAuthentications=password -o PubkeyAuthentication=no \
-    "ntsupport@cpp-db.com@SVPDQHQ01.cpp-db.com" "<PDQInventory command>"
-```
-
-**Gotcha — you MUST domain-qualify the SSH username.** A bare `ntsupport@SVPDQHQ01...` authenticates
-against the **local** SAM (there is a local `ntsupport` from the local-admin standardization) and yields a
-`SVPDQHQ01\ntsupport` token, which gets the *same* Console Users denial. Use `ntsupport@cpp-db.com@<host>`
-or `cpp-db\ntsupport@<host>`, and confirm with `whoami` — it must print `cpp-db\ntsupport`.
-
-**Licence model:** `LicensedUser` tracks **named users** (7 currently: `2fperez`, `2bcampbell`, `2lbejnar`,
-`2rceglarz`, `jelgin`, `ntsupport`, `rceglarz`). Using an identity that is *already* in that table costs
-nothing. Only a **new** identity (a fresh service account, or adding the `claude` local account) consumes
-another seat. Purchased seat count is not stored in the DB — check the PDQ account portal.
-
-**`cpp-db\ntsupport` is RID 500** — the renamed built-in domain Administrator. Fine for occasional
-interactive work; for anything recurring and unattended, prefer a dedicated account in `CPP-DB\netops`
-(costs one seat) over running the built-in DA on a schedule.
+**`cpp-db\ntsupport` is RID 500** — the renamed built-in domain Administrator. Acceptable for the PDQ
+automation because it is already the standing pattern for Windows/AD work here, but for any *new*
+unattended service prefer a dedicated account in `CPP-DB\netops` (costs one seat) over the built-in DA.
 
 CLI sessions are recorded in `ConsoleUserSessions` with the **`CLI`** column populated (Console sessions
 populate `Console` instead), so CLI use is distinguishable from GUI use in the audit trail.
@@ -91,9 +104,9 @@ Run sqlite3 queries over SSH using cmd.exe:
 PDQ_INV_DB='C:\ProgramData\Admin Arsenal\PDQ Inventory\Database.db'
 PDQ_SQLITE='"C:\Program Files (x86)\Admin Arsenal\PDQ Inventory\sqlite3.exe"'
 
-SSHPASS="$PDQ_PASS" sshpass -e ssh -n -q \
+ssh -n -q -i "$SSH_KEY" \
     -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-    "claude@SVPDQHQ01.cpp-db.com" \
+    "ntsupport@cpp-db.com@SVPDQHQ01.cpp-db.com" \
     "$PDQ_SQLITE \"$PDQ_INV_DB\" \"<SQL query>\""
 ```
 
@@ -218,10 +231,9 @@ Examples, Notes**. The vendor files are stamped `Last updated: 2026-06-01` — i
 **Re-pull after every PDQ upgrade** — they are overwritten by the installer:
 
 ```bash
-source ~/GitHub/.tokens/patching
 for p in "PDQ Deploy\\.opencode\\skills\\pdq-deploy" "PDQ Inventory\\.opencode\\skills\\pdq-inventory"; do
-  SSHPASS="$PDQ_PASS" sshpass -e ssh -n -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-    "claude@SVPDQHQ01.cpp-db.com" "type \"C:\\Program Files (x86)\\Admin Arsenal\\$p\\SKILL.md\"" | tr -d '\r'
+  ssh -n -q -i "$SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    "ntsupport@cpp-db.com@SVPDQHQ01.cpp-db.com" "type \"C:\\Program Files (x86)\\Admin Arsenal\\$p\\SKILL.md\"" | tr -d '\r'
 done
 ```
 
@@ -335,11 +347,10 @@ GetDeploymentStatus { -Id <id[,id,...]> | -Name <pkg> | -PackageId <id> | -Runni
 **Poll a deployment to completion** by looping while the exit code is `2`:
 
 ```bash
-source ~/GitHub/.tokens/patching
 PDQ_DEPLOY='"C:\Program Files (x86)\Admin Arsenal\PDQ Deploy\PDQDeploy.exe"'
-SSHPASS="$PDQ_PASS" sshpass -e ssh -n -q \
+ssh -n -q -i "$SSH_KEY" \
     -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-    "claude@SVPDQHQ01.cpp-db.com" "$PDQ_DEPLOY GetDeploymentStatus -Id $deploy_id" > /tmp/pdq.out 2>&1
+    "ntsupport@cpp-db.com@SVPDQHQ01.cpp-db.com" "$PDQ_DEPLOY GetDeploymentStatus -Id $deploy_id" > /tmp/pdq.out 2>&1
 deploy_rc=$?   # NOT `status` — reserved in zsh, see CLAUDE.md
 ```
 
@@ -380,9 +391,9 @@ reporting. It does **not** give per-step output; gzip log reading (below) is sti
 ```bash
 PDQ_DEPLOY='"C:\Program Files (x86)\Admin Arsenal\PDQ Deploy\PDQDeploy.exe"'
 
-SSHPASS="$PDQ_PASS" sshpass -e ssh -n -q \
+ssh -n -q -i "$SSH_KEY" \
     -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-    "claude@SVPDQHQ01.cpp-db.com" \
+    "ntsupport@cpp-db.com@SVPDQHQ01.cpp-db.com" \
     "$PDQ_DEPLOY Deploy -Package \"Package Name\" -Targets MACHINE01 MACHINE02 -UseScanUserCredentials"
 ```
 
@@ -425,9 +436,9 @@ Pass scripts base64-encoded (`-EncodedCommand`) to avoid shell quoting issues:
 
 ```bash
 encoded=$(printf '%s' "$ps_script" | iconv -t UTF-16LE | base64 | tr -d '\n')
-SSHPASS="$PDQ_PASS" sshpass -e ssh -n -q \
+ssh -n -q -i "$SSH_KEY" \
     -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-    "claude@SVPDQHQ01.cpp-db.com" \
+    "ntsupport@cpp-db.com@SVPDQHQ01.cpp-db.com" \
     "powershell -NonInteractive -NoProfile -EncodedCommand ${encoded}"
 ```
 

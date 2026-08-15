@@ -235,12 +235,12 @@ ssh but the backslash gets mangled by the local shell, so avoid it. Windows 11 s
 
 ### Pattern — SSH to SVPDQHQ01, then Invoke-Command to endpoint
 
-PDQ SSH creds: `~/GitHub/.tokens/patching` → `$PDQ_PASS`, user `claude` (see `api/pdq/`).
+PDQ SSH: key auth as the domain DA `ntsupport@cpp-db.com` — must be domain-qualified (see `api/pdq/`).
 
 ```bash
-source ~/GitHub/.tokens/patching
-SSHPASS="$PDQ_PASS" sshpass -e ssh -n -q -o StrictHostKeyChecking=no \
-  claude@SVPDQHQ01.cpp-db.com "powershell -NoProfile -EncodedCommand <b64>"
+SSH_KEY=$([[ -f ~/.ssh/id_ed25519_pdq ]] && echo ~/.ssh/id_ed25519_pdq || echo ~/.ssh/id_ed25519)
+ssh -n -q -i "$SSH_KEY" -o StrictHostKeyChecking=no \
+  ntsupport@cpp-db.com@SVPDQHQ01.cpp-db.com "powershell -NoProfile -EncodedCommand <b64>"
 ```
 
 Build the payload so **no secret ever lands in a command line**, and target the endpoint's **GP
