@@ -31,6 +31,37 @@ curl -sk -u "admin:${F5_PASS}" -X PATCH \
 
 ---
 
+## CU completion confirmation (Event ID 19)
+
+After a reboot that followed a **Cumulative Update**, the 20 minutes is a **ceiling, not a fixed wait**.
+`api/patching/cu-confirm.sh` polls every rebooted machine until each logs
+`Microsoft-Windows-WindowsUpdateClient` **Event ID 19** ("Installation Successful"); the loop proceeds as
+soon as all confirm, and **stops the run and emails Frank** if the ceiling is reached.
+
+**Why not the reboot flags.** They lie. On SVPDQHQ01 (2026-08-15) `CBS RebootPending`, `WU RebootRequired`,
+`PendingFileRenameOperations`, the already-updated UBR **and PDQ's own `NeedsReboot`** all read "done" at
+11:02 — and TrustedInstaller rebooted the machine again at 11:05:46. Event 19 landed at 11:07:29, after the
+second reboot. Trigger-to-genuinely-done was **11.5 minutes**, which is what the 20-minute ceiling covers.
+
+**Transport: WMI/DCOM (`Win32_NTLogEvent`), not `Get-WinEvent`.** `Get-WinEvent -ComputerName` uses the
+Remote Event Log RPC endpoint, which some hosts do not answer — `NEDVVDMC01`/`NEDVVDMC02` hang ~21 s then
+fail "RPC server is unavailable" *even with correct credentials*, while WMI answers in ~1 s. WMI is the
+channel PDQ already scans over, so it reaches everything PDQ manages.
+
+**Credentials are per-domain**, mapped from PDQ Inventory's `ADDomain` column (no DNS guessing) to the
+matching Key Vault secret. DEV/QA/VDI alone spans three domains: 34 `cpp-db.com`, 2 `opp.local`,
+3 `oppnewapp.local`. Passwords differ per domain even where the account name repeats, and they are passed
+on **stdin, never argv**. OPP domains lock out at 5 attempts — one attempt per host.
+
+Measured: 17 machines across 3 domains confirmed in **8.4 s** total.
+
+**Non-CU reboots keep the flat 5-minute wait** — unchanged, and deliberately so.
+
+The `patch-svsqlmismk01-resume.sh` 20-minute wait is **not** a CU wait; it covers SQL service-pack
+post-reboot work, which may never emit Event 19. It is deliberately left as a flat wait.
+
+---
+
 ## Autonomous Patch Loop (zsh)
 
 **Critical requirements — learned from prior bugs:**
