@@ -44,6 +44,18 @@ INVDB='C:\ProgramData\Admin Arsenal\PDQ Inventory\Database.db'
 PWSH='"C:\Program Files\PowerShell\7\pwsh.exe"'
 POLL_SECONDS="${CU_CONFIRM_POLL:-60}"
 
+# Stragglers = expected MINUS those that reported success. Derived from the expected
+# list, not from the output: a machine PDQ has never heard of produces no line at all,
+# and deriving from output would then name nobody in the alert (seen in test, 2026-08-15).
+missing_from() {   # $1 = marker (OK| or READY|), $2 = output
+    local marker="$1" out="$2" seen m result=""
+    seen=$(printf '%s\n' "$out" | grep "^${marker}" | cut -d'|' -f2 | sort -u)
+    for m in "${MACHINES[@]}"; do
+        printf '%s\n' "$seen" | grep -qx "$m" || result+="$m "
+    done
+    printf '%s' "$result"
+}
+
 cu_log() { echo "[$(date '+%H:%M:%S')] cu-confirm: $*"; }
 pdq_ssh() { ssh -n -q -i "$SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 "$PDQ_HOST" "$1" | tr -d '\r'; }
 
@@ -110,17 +122,95 @@ run_check() {
           "$PDQ_HOST" "$PWSH -NonInteractive -NoProfile -EncodedCommand $enc" 2>&1 | tr -d '\r'
 }
 
+PS_SCM=$(cat <<'PSEOF'
+$ProgressPreference='SilentlyContinue'
+$pwCpp = [Console]::In.ReadLine()
+$pwOpp = [Console]::In.ReadLine()
+$pwNew = [Console]::In.ReadLine()
+$pwAsh = [Console]::In.ReadLine()
+$pwWeb = [Console]::In.ReadLine()
+$creds = @{
+  'cpp-db.com'      = @{U='CPP-DB\ntsupport';        P=$pwCpp}
+  'cpp-web.com'     = @{U='cpp-web.com\ntsupport';   P=$pwWeb}
+  'opp.local'       = @{U='opp.local\#domain';       P=$pwOpp}
+  'oppnewapp.local' = @{U='oppnewapp.local\#domain'; P=$pwNew}
+  'oppashapp.local' = @{U='oppashapp.local\#domain'; P=$pwAsh}
+}
+$pairs = @'
+__PAIRS__
+'@ -split "\r?\n" | Where-Object { $_.Trim() -ne '' }
+
+$pairs | ForEach-Object -ThrottleLimit 12 -Parallel {
+    $c = $using:creds
+    $p = $_.Trim() -split '\|'; $m = $p[0]; $d = $p[1]
+    $e = $c[$d]
+    if (-not $e) { "NOCRED|$m|$d"; return }
+    # An SSH session carries no network credentials, so establish one to the host
+    # first; the SCM RPC bind then uses it. Delete afterwards so nothing lingers.
+    & net use "\\$m\IPC$" /user:$($e.U) $($e.P) 2>&1 | Out-Null
+    try {
+        # Open the Service Control Manager exactly as PDQ Deploy does. WMI is NOT a
+        # valid substitute: on 2026-08-15 DCOM answered while SCM was still refusing.
+        $sc = New-Object System.ServiceProcess.ServiceController('Spooler',$m)
+        $null = $sc.Status
+        "READY|$m|-"
+    } catch {
+        $msg = ($_.Exception.Message -replace '[\|\r\n]',' ')
+        "NOTREADY|$m|$($msg.Substring(0,[Math]::Min(60,$msg.Length)))"
+    } finally {
+        & net use "\\$m\IPC$" /delete /y 2>&1 | Out-Null
+    }
+}
+PSEOF
+)
+
+run_scm() {
+    local ps enc
+    ps="${PS_SCM/__PAIRS__/$PAIRS}"
+    enc=$(printf '%s' "$ps" | iconv -t UTF-16LE | base64 | tr -d '\n')
+    printf '%s\n%s\n%s\n%s\n%s\n' \
+      "$(~/GitHub/.tokens/kv-get.sh da-cpp-db-com)" \
+      "$(~/GitHub/.tokens/kv-get.sh da-opp-local)" \
+      "$(~/GitHub/.tokens/kv-get.sh da-oppnewapp-local)" \
+      "$(~/GitHub/.tokens/kv-get.sh da-oppashapp-local)" \
+      "$(~/GitHub/.tokens/kv-get.sh da-cpp-web-com)" \
+    | ssh -q -i "$SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
+          "$PDQ_HOST" "$PWSH -NonInteractive -NoProfile -EncodedCommand $enc" 2>&1 | tr -d '\r'
+}
+
 cu_log "confirming ${#MACHINES[@]} machine(s) via Event 19 since '$SINCE' (deadline $(date -r "$DEADLINE_EPOCH" '+%H:%M:%S'))"
 
 while :; do
     OUT=$(run_check)
     CONFIRMED=$(printf '%s\n' "$OUT" | grep -c '^OK|' || true)
-    STRAGGLERS=$(printf '%s\n' "$OUT" | grep -vE '^OK\|' | grep -oE '^[A-Z]+\|[^|]+' | cut -d'|' -f2 | sort -u | tr '\n' ' ')
+    STRAGGLERS=$(missing_from 'OK|' "$OUT")
     cu_log "confirmed ${CONFIRMED}/${#MACHINES[@]}${STRAGGLERS:+ | waiting on: $STRAGGLERS}"
 
     if [[ "$CONFIRMED" -eq "${#MACHINES[@]}" ]]; then
         cu_log "all machines confirmed update completion."
-        exit 0
+        # PHASE 2 — Event 19 says the UPDATE finished; it does NOT say the machine will
+        # accept a new deployment. On 2026-08-15 SVWCFPRDDC01 confirmed at 13:56:07 and
+        # PDQ failed against it 10 s later with "Cannot open Service Control Manager"
+        # (RPC 1726), costing a wasted cycle plus a 4-minute settle. Gate on the same
+        # SCM open that PDQ performs. Runs inside the SAME deadline - no new timing.
+        while :; do
+            SOUT=$(run_scm)
+            READY=$(printf '%s\n' "$SOUT" | grep -c '^READY|' || true)
+            NOTREADY=$(missing_from 'READY|' "$SOUT")
+            cu_log "accepting connections ${READY}/${#MACHINES[@]}${NOTREADY:+ | waiting on: $NOTREADY}"
+            if [[ "$READY" -eq "${#MACHINES[@]}" ]]; then
+                cu_log "all machines ready to accept deployments."
+                exit 0
+            fi
+            if [[ $(date '+%s') -ge $DEADLINE_EPOCH ]]; then
+                cu_log "DEADLINE REACHED during readiness check: $READY/${#MACHINES[@]} accepting connections."
+                printf '%s\n' "$SOUT" | grep -vE '^READY\|' | sed 's/^/    /'
+                echo "UNCONFIRMED: $NOTREADY"
+                exit 2
+            fi
+            sleep 20
+        done
     fi
 
     if [[ $(date '+%s') -ge $DEADLINE_EPOCH ]]; then

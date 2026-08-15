@@ -55,6 +55,28 @@ on **stdin, never argv**. OPP domains lock out at 5 attempts — one attempt per
 
 Measured: 17 machines across 3 domains confirmed in **8.4 s** total.
 
+**Phase 2 — ready to accept a deployment.** Event 19 says the *update* finished; it does **not** say the
+machine will accept a new deployment. On 2026-08-15 `SVWCFPRDDC01` confirmed Event 19 at 13:56:07 and PDQ
+failed against it ten seconds later with *"Cannot open Service Control Manager"* (`NativeErrorCode 1726`),
+costing a wasted cycle plus a 4-minute settle and a retry. `cu-confirm.sh` now gates on the **same SCM open
+that PDQ Deploy performs** (`ServiceController` against the target) before returning.
+
+**WMI is not a valid substitute here, and the incident proves it:** DCOM answered at 13:56:07 — that is how
+Event 19 was read — while SCM was still refusing at 13:56:17. Different subsystems, and only SCM is what
+PDQ actually needs.
+
+Mechanics: an SSH session has no network credentials, so the check does `net use \\<host>\IPC$` with the
+per-domain DA first, opens SCM, then deletes the session. The SCM bind costs a flat **~21 s per host**
+regardless of scope (single-service query is no faster than enumerating all 211, and the FQDN does not
+help), so it runs 12-way parallel — 3 machines complete in ~26 s.
+
+Phase 2 runs **inside the same deadline** as phase 1. No new timing constant is introduced, and a timeout
+in either phase produces the same stop-and-email.
+
+**Stragglers are derived from the expected machine list, not from the output.** A machine PDQ has never
+heard of produces no output line at all, so deriving from output named nobody in the alert — caught in
+testing, and an alert with no machine names is close to useless.
+
 **Non-CU reboots keep the flat 5-minute wait** — unchanged, and deliberately so.
 
 The `patch-svsqlmismk01-resume.sh` 20-minute wait is **not** a CU wait; it covers SQL service-pack
