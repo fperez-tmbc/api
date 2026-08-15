@@ -32,7 +32,9 @@ Many sites expose clean data endpoints that bypass JS rendering entirely.
 
 Zendesk-hosted help centres (`<vendor>.zendesk.com/hc/...`) commonly 403 both WebFetch and curl **even
 with a full browser UA**, while the identical articles are public and free over the help-center API.
-Verified against Mimecast 2026-08-08; the pattern is Zendesk's, so it applies to any vendor on it.
+Verified against Mimecast 2026-08-08 and **PDQ 2026-08-15** (`help.pdq.com`, article id 360050686511 —
+WebFetch and curl both 403 with a full browser UA; the API returned it fine on the custom domain, while
+`pdq.zendesk.com` 404s). The pattern is Zendesk's, so it applies to any vendor on it.
 
 ```bash
 # find articles — NOTE: no locale segment, or it returns nothing
