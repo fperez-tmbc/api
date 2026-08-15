@@ -22,12 +22,24 @@ The key is authorized via `C:\ProgramData\ssh\administrators_authorized_keys`, w
 applies to **any member of the local Administrators group**. `CPP-DB\Domain Admins` is a member, so the
 same Mac key logs in as the domain DA. Confirm with `whoami` → must print `cpp-db\ntsupport`.
 
-### You MUST domain-qualify the username
+### You MUST domain-qualify the username — it fails HALF-WAY, not cleanly
 
-There is also a **local** `ntsupport` account on this host (RID 1001, created 2016-09-20, unrelated to the
-2026-07 local-admin standardization). A bare `ntsupport@SVPDQHQ01.cpp-db.com` matches the same global key
-file and logs you in as **`SVPDQHQ01\ntsupport`** — a local token, which Inventory then denies. Use
-`ntsupport@cpp-db.com@<host>` (or `cpp-db\ntsupport@<host>`) and verify with `whoami`.
+There is also a **local** `ntsupport` account on this host (RID 1001, password last set 2016-09-20,
+unrelated to the 2026-07 local-admin standardization, which standardized `Administrator` at RID 500 and
+left this one alone). It is enabled and a member of local Administrators, so the **same key** in
+`administrators_authorized_keys` matches it.
+
+A bare `ntsupport@SVPDQHQ01.cpp-db.com` therefore logs you in as **`SVPDQHQ01\ntsupport`** — and because
+that is a local admin, Deploy's `BUILTIN\Administrators` entry lets the **Deploy CLI succeed** while the
+**Inventory CLI is denied**. Confirmed 2026-08-15: `GetPackageNames` returned all 407 packages, and
+`GetAllCollections` returned `Access denied`. A script that forgets the domain suffix will fire
+deployments and then fail on Inventory steps, which is worse than a clean auth failure.
+
+Always `ntsupport@cpp-db.com@<host>` (or `cpp-db\ntsupport@<host>`), and assert on `whoami` returning
+`cpp-db\ntsupport` before doing anything else.
+
+Two profiles exist and are easy to confuse — `C:\Users\ntsupport` is the **domain** account (SID …-500),
+`C:\Users\ntsupport.SVPDQHQ01` is the **local** one (SID …-1001).
 
 ### Capabilities — full access as `cpp-db\ntsupport`
 
@@ -264,7 +276,7 @@ All verified present via `PDQDeploy.exe Help` on SVPDQHQ01. **Ent** = Enterprise
 | `ExportSettings` | Ent | Export all preferences to XML — **new in 20.1.8.0** |
 | `ExportVariables` / `ImportVariables` | Ent | Custom-variable XML export/import — **new in 20.1.8.0** |
 | `GetDeploymentStatus` | Ent | Query deployment status — see below |
-| `GetPackageNames` | Free | List all package names (419 on our box) |
+| `GetPackageNames` | Free | List all package names (407 on our box) |
 | `GetSchedules` | Ent | List schedules with numeric IDs |
 | `Help` | Free | `Help` alone lists commands; `Help <Command>` gives full syntax |
 | `OptimizeDatabase` | Free | `VACUUM` the DB (`-Wait`) |
