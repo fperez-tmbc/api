@@ -43,7 +43,9 @@ curl -sk -u "admin:${F5_PASS}" -X PATCH \
 - Use `if [[ "$VAR" == "value" ]]; then break; fi` — NOT `[[ ]] && break` (unreliable in zsh loops)
 - Use epoch-based waits: `TARGET_EPOCH=$(( $(date '+%s') + MIN * 60 ))` + `until [[ $(date '+%s') -ge $TARGET_EPOCH ]]; do sleep 10; done`
 
-**Scan freshness:** After deployment is `Finished`, immediately check `COUNT(DISTINCT c.ComputerId)` where `SuccessfulScanDate < Deployments.Started`. Use `Started` (not `Finished`) — scans happen per-machine during the deployment window. If already 0, proceed immediately. If not, poll every 30 s.
+**Scan freshness:** After deployment is `Finished`, immediately check `COUNT(DISTINCT c.ComputerId)` where `SuccessfulScanDate < Deployments.Started`. Use `Started` (not `Finished`) — scans happen per-machine during the deployment window. If already 0, proceed immediately. If not, poll every 30 s, up to 10 times (5 min).
+
+**If the poll does not converge, force it — do not fall through.** `PDQInventory ScanComputers -Computers <stragglers> -Wait -Quiet -Timeout 900` blocks until the rescan finishes, then re-check. This closes a real gap: the loop used to time out silently after 15 min and `NeedsReboot` was then read from *pre-deployment* data, so a machine whose scan lagged could have its pending reboot missed and be declared clean. The Inventory CLI only became reachable to automation on 2026-08-15. Note `-Quiet` and `-Timeout` both **require** `-Wait`.
 
 **Cycle targets:**
 - Cycle 1: full collection (mandatory)
@@ -61,6 +63,7 @@ source ~/GitHub/.tokens/patching   # F5_PASS only; PDQ SSH is key-based
 if [[ -f ~/.ssh/id_ed25519_pdq ]]; then SSH_KEY=~/.ssh/id_ed25519_pdq; else SSH_KEY=~/.ssh/id_ed25519; fi
 
 PDQ_DEPLOY='"C:\Program Files (x86)\Admin Arsenal\PDQ Deploy\PDQDeploy.exe"'
+PDQ_INVENTORY='"C:\Program Files (x86)\Admin Arsenal\PDQ Inventory\PDQInventory.exe"'
 PDQ_DEPLOY_DB='C:\ProgramData\Admin Arsenal\PDQ Deploy\Database.db'
 PDQ_INV_DB='C:\ProgramData\Admin Arsenal\PDQ Inventory\Database.db'
 PDQ_SQLITE='"C:\Program Files (x86)\Admin Arsenal\PDQ Inventory\sqlite3.exe"'
@@ -112,12 +115,31 @@ while true; do
     CYCLE_MACHINES=("${(@f)$(pdq_ssh "$PDQ_SQLITE \"$PDQ_DEPLOY_DB\" \"SELECT Name FROM DeploymentComputers WHERE DeploymentId = $DEPLOY_ID ORDER BY Name\"")}")
     CYCLE_IN=$(printf "'%s'," "${CYCLE_MACHINES[@]}"); CYCLE_IN="${CYCLE_IN%,}"
 
-    for i in $(seq 1 30); do
-        PENDING_SCANS=$(pdq_ssh "$PDQ_SQLITE \"$PDQ_INV_DB\" \"SELECT COUNT(DISTINCT ComputerId) FROM Computers WHERE Name IN ($CYCLE_IN) AND (SuccessfulScanDate IS NULL OR SuccessfulScanDate < '$STARTED')\"")
+    # Wait for the automatic post-deployment scans. PDQ scans each machine as its
+    # own step completes, so this normally converges well inside the window.
+    SCAN_STALE_SQL="SELECT COUNT(DISTINCT ComputerId) FROM Computers WHERE Name IN ($CYCLE_IN) AND (SuccessfulScanDate IS NULL OR SuccessfulScanDate < '$STARTED')"
+    for i in $(seq 1 10); do
+        PENDING_SCANS=$(pdq_ssh "$PDQ_SQLITE \"$PDQ_INV_DB\" \"$SCAN_STALE_SQL\"")
         log "Machines not yet rescanned: $PENDING_SCANS"
         if [[ "$PENDING_SCANS" == "0" ]]; then break; fi
         sleep 30
     done
+
+    # Never read NeedsReboot off stale Inventory data. Previously this loop just
+    # timed out and fell through, so a machine whose scan lagged could be read
+    # from pre-deployment data and its pending reboot missed. The Inventory CLI
+    # became reachable 2026-08-15, so force a scan on the stragglers and block.
+    if [[ "$PENDING_SCANS" != "0" ]]; then
+        STALE_MACHINES=("${(@f)$(pdq_ssh "$PDQ_SQLITE \"$PDQ_INV_DB\" \"SELECT DISTINCT Name FROM Computers WHERE Name IN ($CYCLE_IN) AND (SuccessfulScanDate IS NULL OR SuccessfulScanDate < '$STARTED') ORDER BY Name\"")}")
+        log "Forcing rescan of ${#STALE_MACHINES[@]} machine(s): ${STALE_MACHINES[*]}"
+        pdq_ssh "$PDQ_INVENTORY ScanComputers -Computers ${STALE_MACHINES[*]} -Wait -Quiet -Timeout 900" >/dev/null
+        PENDING_SCANS=$(pdq_ssh "$PDQ_SQLITE \"$PDQ_INV_DB\" \"$SCAN_STALE_SQL\"")
+        if [[ "$PENDING_SCANS" == "0" ]]; then
+            log "Forced rescan complete - Inventory is current."
+        else
+            log "WARNING: $PENDING_SCANS machine(s) still stale after a forced rescan; reboot state for those may be wrong."
+        fi
+    fi
 
     REBOOT_MACHINES=("${(@f)$(pdq_ssh "$PDQ_SQLITE \"$PDQ_INV_DB\" \"SELECT DISTINCT Name FROM Computers WHERE Name IN ($CYCLE_IN) AND NeedsReboot = 1 ORDER BY Name\"")}")
     REBOOT_LIST="${REBOOT_MACHINES[*]}"
