@@ -31,6 +31,66 @@ curl -sk -u "admin:${F5_PASS}" -X PATCH \
 
 ---
 
+## Pre-flight checks (run BEFORE suppressing anything)
+
+Both are read-only. Both were used by hand on 2026-08-15 and both mattered; neither changes any timing.
+
+### 1. F5 pool health — F5 collections only
+
+Before disabling, confirm every affected pool has a **healthy peer that will keep serving**, and re-confirm
+after. A staggered pair must never take a pool to zero.
+
+```bash
+source ~/GitHub/.tokens/patching
+for POOL in <pools for this collection>; do
+  curl -sk -u "admin:${F5_PASS}" --max-time 20 \
+    "https://mkf5prod01.cpp-db.com/mgmt/tm/ltm/pool/~Common~${POOL}/members" \
+  | python3 -c "
+import sys,json
+d=json.loads(sys.stdin.read())
+serving=[m['name'] for m in d.get('items',[]) if m['session']!='user-disabled' and m['state']=='up']
+print('  {:<18} serving={} {}'.format('$POOL', serving, 'OK' if serving else '*** POOL WOULD BE EMPTY ***'))"
+done
+```
+
+Capture the full baseline first (`session` + `state` per member) so the post-run revert can be verified
+against it rather than against an assumption.
+
+### 2. The PDQ server's own DC dependency — DC collections especially
+
+`SVPDQHQ01` drives every run over SSH as the **domain** account `cpp-db\ntsupport`, so a DC group can
+contain the DC that PDQ itself depends on for DNS and Kerberos. **Verified 2026-08-15: Group 1 held
+SVPDQHQ01's secondary DNS, and Group 2 held its primary DNS *and* its authenticating DC.** Patching without
+checking risks severing the control channel mid-run.
+
+```bash
+# What does SVPDQHQ01 depend on, and which DC is it using right now?
+Get-DnsClientServerAddress -AddressFamily IPv4 | Where-Object {$_.ServerAddresses}
+nltest /dsgetdc:cpp-db.com
+# Reverse-resolve each DNS server and check it against the group being patched
+Resolve-DnsName <each DNS server IP>
+```
+
+Then confirm the **peer that will carry the domain** actually answers — not just that it is powered on:
+
+```powershell
+Resolve-DnsName -Name svpdqhq01.cpp-db.com -Server <peer IP>   # DNS
+foreach ($p in 389,88,3268) { Test-NetConnection -ComputerName <peer IP> -Port $p }  # LDAP / Kerberos / GC
+```
+
+**Read `ACCESS_DENIED` from `nltest` correctly.** An SSH session has no network credentials, so
+`nltest /dsgetdc /server:<peer>` and `nltest /dclist` return `ERROR_ACCESS_DENIED` regardless of DC health.
+That is the double-hop, not a fault — do not abort a run on it. Judge health from the DNS answer and the
+open ports instead. See `api/ssh/README.md`.
+
+**Break-glass:** if domain auth to SVPDQHQ01 does fail, Key Vault `local-admin-server-us` is
+`SVPDQHQ01\Administrator`. Confirm it is retrievable *before* rebooting the authenticating DC.
+
+Outcome on 2026-08-15: SVPDQHQ01 failed over to SVDCMK01 during SVDCDC01's reboot and stayed there. Every
+SSH call and both confirmation phases kept working. Redundancy verified, not assumed.
+
+---
+
 ## CU completion confirmation (Event ID 19)
 
 After a reboot that followed a **Cumulative Update**, the 20 minutes is a **ceiling, not a fixed wait**.
