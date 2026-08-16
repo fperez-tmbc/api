@@ -81,3 +81,35 @@ Same pool/member pairs — body: `{"session":"user-enabled","state":"user-up"}`
 | Pool `WWW.SKILLSONE.COM` | `ltm/pool/~Common~WWW.SKILLSONE.COM` | `{"monitor":"/Common/gateway_icmp and /Common/WWW.SKILLSONE.COM"}` |
 
 **Note:** Unlike Web Staggered groups (pool member disable/enable), PROD applies a downtime iRule to the virtual servers and swaps the pool health monitor. The combined monitor API format requires full `/Common/` paths space-separated — differs from tmsh syntax.
+
+---
+
+## `Backup` collection — check for jobs in flight before patching
+
+**Veeam-specific. Do not generalise this to other collections** — there is no reliable cross-application
+"busy" signal and probing every host is not worth the cost. It matters here because rebooting a Veeam
+server mid-job kills the running backups.
+
+| Host | Product | Idle looks like |
+|---|---|---|
+| `SVVEEAMAVS01` | Veeam Backup & Replication | **no `VeeamAgent.exe` processes.** Those are the job workers — on 2026-08-15 there were 5, running 54 min to 4 h |
+| `SVVEEAMDC04` | Veeam for M365 (`Veeam.Archiver.*`) | only long-running service processes, and low CPU (2% when idle) |
+
+`Veeam.Backup.Agent.ConfigurationService.exe` and `VeeamTransportSvc.exe` run permanently — they are **not**
+job indicators. Count `VeeamAgent.exe`.
+
+**Use CIM/DCOM with explicit credentials.** `Get-Service -ComputerName` fails from an SSH session with
+*"Cannot open Service Control Manager"* — the double-hop, since the session carries no network credentials
+(see `api/ssh/README.md`).
+
+```bash
+# from SVPDQHQ01, per-domain DA on stdin — never argv
+$cred = New-Object System.Management.Automation.PSCredential('CPP-DB\ntsupport',$sec)
+$s = New-CimSession -ComputerName SVVEEAMAVS01 -Credential $cred -SessionOption (New-CimSessionOption -Protocol Dcom)
+Get-CimInstance -CimSession $s -ClassName Win32_Process -Filter "Name='VeeamAgent.exe'" |
+  ForEach-Object { "{0} started {1:HH:mm:ss}" -f $_.ProcessId, $_.CreationDate }
+```
+
+If workers are present, **patch the idle host only and defer the busy one** — split the run using the
+one-off target-list pattern rather than skipping the whole collection. Done this way on 2026-08-15:
+`SVVEEAMDC04` patched, `SVVEEAMAVS01` deferred at Frank's instruction.
