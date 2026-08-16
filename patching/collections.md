@@ -93,7 +93,7 @@ server mid-job kills the running backups.
 | Host | Product | Idle looks like |
 |---|---|---|
 | `SVVEEAMAVS01` | Veeam Backup & Replication | **no `VeeamAgent.exe` processes.** Those are the job workers — on 2026-08-15 there were 5, running 54 min to 4 h |
-| `SVVEEAMDC04` | Veeam for M365 (`Veeam.Archiver.*`) | only long-running service processes, and low CPU (2% when idle) |
+| `SVVEEAMDC04` | Veeam for M365 (`Veeam.Archiver.*`) | only the **persistent** service processes and low CPU (2–7% idle). `Veeam.Archiver.Service.exe`, `Veeam.Archiver.Proxy.exe`, `Veeam.Archiver.REST.exe` and `arcproxy.exe` run **permanently** — do not read `Archiver.Proxy` as a job, it will give a false busy every time |
 
 `Veeam.Backup.Agent.ConfigurationService.exe` and `VeeamTransportSvc.exe` run permanently — they are **not**
 job indicators. Count `VeeamAgent.exe`.
