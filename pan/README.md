@@ -42,24 +42,28 @@
 
 | Device | Serial | Role | Model | PAN-OS Version | Base URL | Token file |
 |--------|--------|------|-------|----------------|----------|------------|
-| AVSPAN01 | | AVS firewall (active) | PA-VM (VM-300) | 11.2.13 | `https://avspan01.cpp-db.com/api/` | `~/.tokens/pan-avs` |
-| AVSPAN02 | | AVS firewall (passive) | PA-VM (VM-300) | 11.2.13 | `https://avspan02.cpp-db.com/api/` | `~/.tokens/pan-avs` (same — HA pair shares token) |
-| WHPAN01 | | WH firewall (active) | PA-460 | 11.2.13 | `https://whpan01.cpp-db.com/api/` | `~/.tokens/pan-wh` |
-| WHPAN02 | | WH firewall (passive) | PA-460 | 11.2.13 | `https://whpan02.cpp-db.com/api/` | `~/.tokens/pan-wh` (same — HA pair shares token) |
+| AVSPAN01 | 007900000514588 | AVS firewall (active) | PA-VM (VM-300) | 11.2.13 | `https://avspan01.cpp-db.com/api/` | `~/.tokens/pan-avs` |
+| AVSPAN02 | 007900000514582 | AVS firewall (passive) | PA-VM (VM-300) | 11.2.13 | `https://avspan02.cpp-db.com/api/` | `~/.tokens/pan-avs` (same — HA pair shares token) |
+| WHPAN01 | 023001001485 | WH firewall (active) | PA-460 | 11.2.13 | `https://whpan01.cpp-db.com/api/` | `~/.tokens/pan-wh` |
+| WHPAN02 | 023001001692 | WH firewall (passive) | PA-460 | 11.2.13 | `https://whpan02.cpp-db.com/api/` | `~/.tokens/pan-wh` (same — HA pair shares token) |
 | AUPAN01 | 012801036554 | AU firewall (active) | PA-220 | 10.2.18-h9 | `https://aupan01.cpp-db.com/api/` | `~/.tokens/pan-au` |
 | AUPAN02 | 012801036577 | AU firewall (passive) | PA-220 | 10.2.18-h9 | `https://aupan02.cpp-db.com/api/` | `~/.tokens/pan-au` (same — HA pair shares token) |
 | FRPAN01 | 012801036562 | FR firewall (active) | PA-220 | 10.2.18-h9 | `https://frpan01.cpp-db.com/api/` | `~/.tokens/pan-fr` |
 | FRPAN02 | 012801036206 | FR firewall (passive) | PA-220 | 10.2.18-h9 | `https://frpan02.cpp-db.com/api/` | `~/.tokens/pan-fr` (same — HA pair shares token) |
-| DCPANORAMA01 | | Panorama management | Panorama (VM) | 11.2.12 (unverified) | `https://dcpanorama01.cpp-db.com/api/` | `~/.tokens/pan-panorama` |
+| DCPANORAMA01 | | ~~Panorama management~~ **RETIRED** | Panorama (VM) | 11.2.12 (stale) | `https://dcpanorama01.cpp-db.com/api/` | (SSM key deleted) |
 
-_Versions last verified: 2026-08-02 — all 8 firewalls confirmed live via `show system info`.
-DCPANORAMA01 was **not** reachable that date (empty API response, no ICMP), so its 11.2.12 entry
-is stale-as-of-2026-05-27, not a current reading. See `project-panorama-decommission` before
-treating that as a fault._
+_Versions last verified: 2026-08-02 — all 8 firewalls confirmed live via `show system info`._
+
+**DCPANORAMA01 (10.70.15.30) is retired and manages nothing.** All 4 pairs were localized to standalone
+on 2026-07-23; re-verified live 2026-08-17 (100% ICMP loss, 443 unreachable, empty API response, and all
+8 firewalls reporting standalone — see *Is this firewall Panorama-managed?* under **Known Panorama
+Behaviors**). The VM is powered off and parked in the AVS Unused pool, retained but not deleted. Its
+unreachability is **by design, not a fault** — do not chase it. `/pan/apikey/panorama` has been deleted
+from SSM, so its token file is dead too.
 
 Serial column is filled in as devices get audited — populated ones are confirmed from
-`show system info`, blanks just mean not yet recorded. Serials matter for CSP licensing work
-(auth codes are issued per-serial).
+`show system info` (AVS + WH pairs added 2026-08-17), blanks just mean not yet recorded. Serials
+matter for CSP licensing work (auth codes are issued per-serial).
 
 - PA-220 (AUPAN, FRPAN) max supported PAN-OS is 10.2.x — no upgrade path to 11.x exists
 
@@ -946,6 +950,67 @@ AU pre-change values, for a targeted re-enable (both were `download-and-install`
 - `get` on template-managed nodes returns empty (code 7) or merged config (code 19) — reads always work
 - `set` fails with "may need to override template object" when name contains slashes or when truly template-locked
 - Peer group modification requires web UI (template-managed); sub-nodes like redist-rules and aggregation are device-level
+
+### Is this firewall Panorama-managed? — four read-only checks
+
+**The whole fleet is standalone.** All 8 firewalls were localized off DCPANORAMA01 on 2026-07-23 and
+re-verified live on 2026-08-17. Panorama manages **zero** devices. Do not state otherwise from a
+project note or a summary line — those went stale within a day of the cutover. Run these instead.
+
+```bash
+TOKEN=$(tr -d '[:space:]' < ~/GitHub/.tokens/pan-avs)
+URL="https://avspan01.cpp-db.com/api/"
+
+# 1. Connection state to Panorama
+curl -sk "$URL" --data-urlencode type=op --data-urlencode "key=$TOKEN" \
+  --data-urlencode "cmd=<show><panorama-status/></show>"
+
+# 2 + 3. Is any device-group policy / template actually pushed here?
+curl -sk "$URL" --data-urlencode type=op --data-urlencode "key=$TOKEN" \
+  --data-urlencode "cmd=<show><config><pushed-shared-policy/></config></show>"
+curl -sk "$URL" --data-urlencode type=op --data-urlencode "key=$TOKEN" \
+  --data-urlencode "cmd=<show><config><pushed-template/></config></show>"
+
+# 4. Is the device even pointed at a Panorama?
+curl -sk "$URL" --data-urlencode type=config --data-urlencode action=get --data-urlencode "key=$TOKEN" \
+  --data-urlencode "xpath=/config/devices/entry[@name='localhost.localdomain']/deviceconfig/system/panorama-server"
+```
+
+Standalone reads like this:
+
+| Check | Standalone answer |
+|-------|-------------------|
+| `show panorama-status` | `<result></result>` (empty) |
+| `show config pushed-shared-policy` | `status="error"` — **"shared policy is disabled"** |
+| `show config pushed-template` | `status="error"` — **"template is disabled"** |
+| `deviceconfig/system/panorama-server` (and `-server-2`) | `code="7"` — node absent |
+
+The two `pushed-*` commands are the strongest signal: they are PAN-OS explicitly reporting that no
+device-group policy and no template are in effect. `panorama-status` alone is weaker — it is empty both
+when the device is standalone and when it is merely disconnected from a Panorama it still belongs to.
+
+⚠️ **Run a control before believing the empty results.** Four blank answers in a row is also what a bad
+token or an unreachable mgmt IP looks like. Prove the transport works first:
+
+```bash
+# must return a real hostname/serial, and a real hostname
+curl -sk "$URL" --data-urlencode type=op --data-urlencode "key=$TOKEN" \
+  --data-urlencode "cmd=<show><system><info></info></system></show>" | grep -o '<serial>[^<]*'
+curl -sk "$URL" --data-urlencode type=config --data-urlencode action=get --data-urlencode "key=$TOKEN" \
+  --data-urlencode "xpath=/config/devices/entry[@name='localhost.localdomain']/deviceconfig/system/hostname"
+```
+
+**Leftover names are not management.** A standalone firewall still carries cosmetic Panorama-era naming:
+a tag literally named `PANORAMA`, log-forwarding profile `PANORAMA_STD`, `*PANORAMA01` address objects,
+and `loc="shared"` attributes on localized objects. Grepping a config for `panorama` case-insensitively
+hits all of these and proves nothing. Grep **lowercase** — the only real hits are
+`<send-to-panorama>no</send-to-panorama>` inside log-forwarding match-lists.
+
+**Looping over the fleet from zsh:** put the device list in an **array**, not a scalar. zsh does not
+word-split scalars, so `for d in $DEVS` iterates once with the entire string, and `${pair##*:}` then
+picks the *last* token's file — which silently authenticates every device with the wrong token and
+returns `403 Invalid Credential`. Use `DEVS=(avspan01:pan-avs whpan01:pan-wh …)` and `"${DEVS[@]}"`,
+or run the loop under `#!/bin/bash`.
 
 ## Reaching mgmt APIs from AWS (or any across-tunnel source)
 
