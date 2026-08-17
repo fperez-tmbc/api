@@ -42,14 +42,14 @@
 
 | Device | Serial | Role | Model | PAN-OS Version | Base URL | Token file |
 |--------|--------|------|-------|----------------|----------|------------|
-| AVSPAN01 | 007900000514588 | AVS firewall (active) | PA-VM (VM-300) | 11.2.13 | `https://avspan01.cpp-db.com/api/` | `~/.tokens/pan-avs` |
-| AVSPAN02 | 007900000514582 | AVS firewall (passive) | PA-VM (VM-300) | 11.2.13 | `https://avspan02.cpp-db.com/api/` | `~/.tokens/pan-avs` (same — HA pair shares token) |
-| WHPAN01 | 023001001485 | WH firewall (active) | PA-460 | 11.2.13 | `https://whpan01.cpp-db.com/api/` | `~/.tokens/pan-wh` |
-| WHPAN02 | 023001001692 | WH firewall (passive) | PA-460 | 11.2.13 | `https://whpan02.cpp-db.com/api/` | `~/.tokens/pan-wh` (same — HA pair shares token) |
-| AUPAN01 | 012801036554 | AU firewall (active) | PA-220 | 10.2.18-h9 | `https://aupan01.cpp-db.com/api/` | `~/.tokens/pan-au` |
-| AUPAN02 | 012801036577 | AU firewall (passive) | PA-220 | 10.2.18-h9 | `https://aupan02.cpp-db.com/api/` | `~/.tokens/pan-au` (same — HA pair shares token) |
-| FRPAN01 | 012801036562 | FR firewall (active) | PA-220 | 10.2.18-h9 | `https://frpan01.cpp-db.com/api/` | `~/.tokens/pan-fr` |
-| FRPAN02 | 012801036206 | FR firewall (passive) | PA-220 | 10.2.18-h9 | `https://frpan02.cpp-db.com/api/` | `~/.tokens/pan-fr` (same — HA pair shares token) |
+| AVSPAN01 | 007900000514588 | AVS firewall (active) | PA-VM (VM-300) | 11.2.13 | `https://avspan01.cpp-db.com/api/` | `~/GitHub/.tokens/pan-avs` |
+| AVSPAN02 | 007900000514582 | AVS firewall (passive) | PA-VM (VM-300) | 11.2.13 | `https://avspan02.cpp-db.com/api/` | `~/GitHub/.tokens/pan-avs` (same — HA pair shares token) |
+| WHPAN01 | 023001001485 | WH firewall (active) | PA-460 | 11.2.13 | `https://whpan01.cpp-db.com/api/` | `~/GitHub/.tokens/pan-wh` |
+| WHPAN02 | 023001001692 | WH firewall (passive) | PA-460 | 11.2.13 | `https://whpan02.cpp-db.com/api/` | `~/GitHub/.tokens/pan-wh` (same — HA pair shares token) |
+| AUPAN01 | 012801036554 | AU firewall (active) | PA-220 | 10.2.18-h9 | `https://aupan01.cpp-db.com/api/` | `~/GitHub/.tokens/pan-au` |
+| AUPAN02 | 012801036577 | AU firewall (passive) | PA-220 | 10.2.18-h9 | `https://aupan02.cpp-db.com/api/` | `~/GitHub/.tokens/pan-au` (same — HA pair shares token) |
+| FRPAN01 | 012801036562 | FR firewall (active) | PA-220 | 10.2.18-h9 | `https://frpan01.cpp-db.com/api/` | `~/GitHub/.tokens/pan-fr` |
+| FRPAN02 | 012801036206 | FR firewall (passive) | PA-220 | 10.2.18-h9 | `https://frpan02.cpp-db.com/api/` | `~/GitHub/.tokens/pan-fr` (same — HA pair shares token) |
 | DCPANORAMA01 | | ~~Panorama management~~ **RETIRED** | Panorama (VM) | 11.2.12 (stale) | `https://dcpanorama01.cpp-db.com/api/` | (SSM key deleted) |
 
 _Versions last verified: 2026-08-02 — all 8 firewalls confirmed live via `show system info`._
@@ -72,8 +72,8 @@ matter for CSP licensing work (auth codes are issued per-serial).
 - DCPANORAMA01 runs PAN-OS 11.2.x — cert-based token
 - Same API token works on both peers of an HA pair
 - **SSH key auth (svcclaude):**
-  - AVSPAN, WHPAN, DCPANORAMA01 (PAN-OS 11.x): ed25519 — `~/.tokens/svcclaude-key`
-  - AUPAN, FRPAN (PAN-OS 10.2.x): RSA 4096 — `~/.tokens/svcclaude-key-rsa`
+  - AVSPAN, WHPAN, DCPANORAMA01 (PAN-OS 11.x): ed25519 — `~/GitHub/.tokens/svcclaude-key`
+  - AUPAN, FRPAN (PAN-OS 10.2.x): RSA 4096 — `~/GitHub/.tokens/svcclaude-key-rsa`
   - PAN-OS 10.2.x rejects ed25519 via API; RSA uses same base64(full_key_line) format as 11.x
 
 ## General
@@ -720,7 +720,7 @@ Use key-based SSH with stdin heredoc. On PAN-OS 10.2.x, always add `-o Identitie
 > and auth fails. Use `ssh ${=SSH_OPTS} …`, a `opts=(…)` array with `"${opts[@]}"`, or inline the flags.
 
 ```bash
-SSH_OPTS="-i ~/.tokens/svcclaude-key-rsa -o StrictHostKeyChecking=no -o PasswordAuthentication=no \
+SSH_OPTS="-i ~/GitHub/.tokens/svcclaude-key-rsa -o StrictHostKeyChecking=no -o PasswordAuthentication=no \
   -o IdentitiesOnly=yes -o IdentityAgent=none -o PubkeyAcceptedAlgorithms=rsa-sha2-256 -o ConnectTimeout=30"
 
 # Install
