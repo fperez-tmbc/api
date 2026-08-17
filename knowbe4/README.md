@@ -1,6 +1,6 @@
 # KnowBe4 API
 
-Notes and scripts for the KnowBe4 APIs. Tokens are stored in `~/.tokens/knowbe4`.
+Notes and scripts for the KnowBe4 APIs. Tokens are stored in `~/GitHub/.tokens/knowbe4`.
 
 Account ID: `631792`  
 All tokens expire: `2031-04-28`

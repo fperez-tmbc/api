@@ -94,7 +94,7 @@ Basic auth and user-delegated auth are not viable on macOS for non-interactive u
 | Cert expiry | **2028-05-13** (cert `notAfter`; `config.json` still says 2027-05-13 and is wrong) |
 | Entra role (Purview) | `Compliance Administrator` (assigned 2026-08-03) |
 
-Credentials: `~/.tokens/claude-m365/` — `cert.pfx`, `cert.pem`, `key.pem`, `config.json`
+Credentials: `~/GitHub/.tokens/claude-m365/` — `cert.pfx`, `cert.pem`, `key.pem`, `config.json`
 
 ### Connection Snippet
 
