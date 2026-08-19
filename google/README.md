@@ -21,7 +21,12 @@ unqualified Google command in a script or a copied snippet targets production.
 # Corporate: themyersbriggs.com
 
 Set up 2026-08-19. Workspace Business Standard, 5 licensed users. Mail does NOT route
-to Google (MX points at Exchange), but the Workspace mailboxes and Drive exist.
+to Google (MX points at Exchange).
+
+**Nobody actually uses Google productivity apps here.** The mailboxes and Drive exist
+but sit unused. This tenant is identity and cloud infrastructure, primarily a B2C build.
+Practical consequence: the missing domain-wide delegation documented below costs nothing
+real, so do not relax the org key policy to obtain it without a concrete need.
 
 ## Identifiers
 
