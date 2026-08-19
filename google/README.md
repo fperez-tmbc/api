@@ -70,9 +70,10 @@ All backed up to the `google-tmbc` tokens directory.
 Frank holds `roles/resourcemanager.organizationAdmin` at the org root, granted
 2026-08-19. Matt Humora holds the same; asherwood holds `roles/cloud.admin`.
 
-`organizationAdmin` does **not** confer `orgpolicy.policy.set` or
-`resourcemanager.folders.create` (verified by live test). Changing org policies needs an
-additional `roles/orgpolicy.policyAdmin`.
+Frank also holds `roles/orgpolicy.policyAdmin`, granted 2026-08-19, since
+`organizationAdmin` does not confer `orgpolicy.policy.set` on its own (verified by live
+test). That makes the key constraints below *changeable* by him, though they have not
+been changed.
 
 This org is actively used, not a shell for automation. Other projects in it, all owned
 by mhumora, relate to a B2C build:
