@@ -1,4 +1,105 @@
-# Google Workspace API — aionetworking.com
+# Google APIs
+
+Two separate Google tenants are configured on this machine. They share the GAM binary
+and the gcloud CLI but nothing else. Keeping them apart is deliberate: pick the wrong
+selector and you administer the wrong company.
+
+| Tenant | Type | Selector |
+|--------|------|----------|
+| themyersbriggs.com | Corporate, Workspace Business Standard | `gam select tmbc` / `CLOUDSDK_ACTIVE_CONFIG_NAME=tmbc` |
+| aionetworking.com | Personal | bare `gam` / default gcloud config |
+
+**There is no safety net.** A bare `gam` command runs against the personal tenant, and a
+bare `gcloud` command runs against the personal GCP account. Neither will warn you.
+
+---
+
+# Corporate: themyersbriggs.com
+
+Set up 2026-08-19. Workspace Business Standard, 5 licensed users. Mail does NOT route
+to Google (MX points at Exchange), but the Workspace mailboxes and Drive exist.
+
+## Identifiers
+
+| Field | Value |
+|-------|-------|
+| Primary domain | themyersbriggs.com (aliases: mbti.com, test-google-a.com) |
+| Workspace Customer ID | C0314gz35 |
+| GCP Organization ID | 714796663328 |
+| GCP Project | tmbc-claude-automation (number 129993295121) |
+| Service account | tmbc-automation-sa@tmbc-claude-automation.iam.gserviceaccount.com |
+| Admin account | fperez@themyersbriggs.com (super admin) |
+
+OAuth client ID and secret are in 1Password: **IT Operations → "Google Workspace API -
+tmbc-claude-automation"**.
+
+## Usage
+
+```bash
+# Workspace admin (40 scopes, user OAuth)
+gam select tmbc print users
+gam select tmbc info customer
+
+# GCP
+CLOUDSDK_ACTIVE_CONFIG_NAME=tmbc gcloud projects describe tmbc-claude-automation
+
+# GA4 / Tag Manager / Search Console
+~/GitHub/.venv-google/bin/python tmbc-marketing.py discover
+```
+
+## Credential files
+
+Config section `[tmbc]` in `~/.gam/gam.cfg` points `config_dir` at `~/.gam/tmbc/`.
+
+| File | Purpose |
+|------|---------|
+| `~/.gam/tmbc/client_secrets.json` | OAuth desktop client |
+| `~/.gam/tmbc/oauth2.txt` | GAM user token, 40 admin scopes |
+| `.tokens/google-tmbc/marketing-token.json` | GA4 / GTM / Search Console, 7 scopes |
+
+All backed up to the `google-tmbc` tokens directory.
+
+## Service account keys are blocked at org level
+
+Both of these org policies are **enforced and inherited** from the organization:
+
+- `constraints/iam.disableServiceAccountKeyCreation`
+- `constraints/iam.disableServiceAccountKeyUpload`
+
+They are Google secure-by-default policies applied automatically to organizations
+created after May 2024. Confirmed by live test, not by reading policy: creating a
+Google-generated key and uploading a locally-generated 4096-bit public key both fail
+with `FAILED_PRECONDITION`.
+
+**Consequence:** the service account has no key, so **domain-wide delegation is not
+configured**. Everything runs on user OAuth instead. That covers all directory admin
+(users, groups, org units, devices, roles, licences, audit reports) but NOT acting as
+another user to reach their Gmail or Drive.
+
+Relaxing this needs `roles/orgpolicy.policyAdmin` at the org, and should be scoped to a
+single project rather than the whole org if it is ever done.
+
+## Gotchas
+
+- **GAM validates scopes** against its own allow-list. `cloud-platform`, `apps.alerts`,
+  `admin.directory.group.member` and `cloud-identity` are all rejected. Pass a bad scope
+  and GAM prints the full valid list, which is the fastest way to discover it.
+- **Analytics, Tag Manager and Search Console scopes are not in GAM's list at all.** They
+  need the separate token that `tmbc-marketing.py` manages.
+- **ADC is global, not per-configuration.** `gcloud auth application-default login` writes
+  one file shared by every account on the machine. Running it for corporate silently
+  clobbers the personal tenant's ADC. `tmbc-marketing.py` deliberately avoids ADC.
+- **`gam ... use project` needs a real TTY.** Running it via a non-interactive shell dies
+  with `EOFError` at the "Enter your Client ID" prompt. The browser half of the flow
+  survives (GAM runs a local capture server) but the paste-back half does not.
+- **No API exists to create an OAuth client ID.** That step is unavoidably the Cloud
+  Console. Everything downstream of it can be scripted.
+- As of setup, this account had **no** GA4 properties, GTM containers or Search Console
+  sites attached. Verified negative: the API calls succeeded and returned empty.
+
+---
+
+# Personal: aionetworking.com
 
 ## Tooling
 
