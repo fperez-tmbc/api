@@ -26,12 +26,13 @@ to Google (MX points at Exchange), but the Workspace mailboxes and Drive exist.
 | Primary domain | themyersbriggs.com (aliases: mbti.com, test-google-a.com) |
 | Workspace Customer ID | C0314gz35 |
 | GCP Organization ID | 714796663328 |
-| GCP Project | tmbc-claude-automation (number 129993295121) |
-| Service account | tmbc-automation-sa@tmbc-claude-automation.iam.gserviceaccount.com |
+| GCP Project | tmbc-fperez-automation (number 560233548565) |
+| Service account | tmbc-automation-sa@tmbc-fperez-automation.iam.gserviceaccount.com |
 | Admin account | fperez@themyersbriggs.com (super admin) |
 
-OAuth client ID and secret are in 1Password: **IT Operations → "Google Workspace API -
-tmbc-claude-automation"**.
+OAuth client ID and secret are in 1Password: **Employee vault → "Google Workspace API -
+tmbc-fperez-automation"**. This is Frank's own access, so it lives in Employee, not a
+shared vault.
 
 ## Usage
 
@@ -41,7 +42,7 @@ gam select tmbc print users
 gam select tmbc info customer
 
 # GCP
-CLOUDSDK_ACTIVE_CONFIG_NAME=tmbc gcloud projects describe tmbc-claude-automation
+CLOUDSDK_ACTIVE_CONFIG_NAME=tmbc gcloud projects describe tmbc-fperez-automation
 
 # GA4 / Tag Manager / Search Console
 ~/GitHub/.venv-google/bin/python tmbc-marketing.py discover
