@@ -65,6 +65,26 @@ Config section `[tmbc]` in `~/.gam/gam.cfg` points `config_dir` at `~/.gam/tmbc/
 
 All backed up to the `google-tmbc` tokens directory.
 
+## Org-level access
+
+Frank holds `roles/resourcemanager.organizationAdmin` at the org root, granted
+2026-08-19. Matt Humora holds the same; asherwood holds `roles/cloud.admin`.
+
+`organizationAdmin` does **not** confer `orgpolicy.policy.set` or
+`resourcemanager.folders.create` (verified by live test). Changing org policies needs an
+additional `roles/orgpolicy.policyAdmin`.
+
+This org is actively used, not a shell for automation. Other projects in it, all owned
+by mhumora, relate to a B2C build:
+
+| Project | Name | Created |
+|---------|------|---------|
+| `tmbc-b2c-prod` | tmbc-b2c-prod | 2026-08-19 |
+| `dev-b2cproject` | tmbc-b2c-dev | 2026-03-12 |
+| `hardy-force-505017-s5` | GoogleTagManagerAccess | 2026-08-09 |
+
+Treat anything outside `tmbc-fperez-automation` as someone else's production.
+
 ## Service account keys are blocked at org level
 
 Both of these org policies are **enforced and inherited** from the organization:
