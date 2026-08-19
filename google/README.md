@@ -6,11 +6,16 @@ selector and you administer the wrong company.
 
 | Tenant | Type | Selector |
 |--------|------|----------|
-| themyersbriggs.com | Corporate, Workspace Business Standard | `gam select tmbc` / `CLOUDSDK_ACTIVE_CONFIG_NAME=tmbc` |
-| aionetworking.com | Personal | bare `gam` / default gcloud config |
+| themyersbriggs.com | Corporate, Workspace Business Standard | bare `gam` (default) / `CLOUDSDK_ACTIVE_CONFIG_NAME=tmbc` |
+| aionetworking.com | Personal | `gam select personal` / bare `gcloud` (default) |
 
-**There is no safety net.** A bare `gam` command runs against the personal tenant, and a
-bare `gcloud` command runs against the personal GCP account. Neither will warn you.
+**GAM and gcloud default to DIFFERENT tenants.** As of 2026-08-19 `gam.cfg` has
+`section = tmbc` in `[DEFAULT]`, so a bare `gam` command hits the **corporate** tenant.
+A bare `gcloud` command still hits the **personal** account. Neither warns you.
+
+That asymmetry is deliberate but easy to forget: a mistyped GAM command lands on 5 real
+corporate users, while a mistyped gcloud command lands somewhere harmless. Be explicit
+with selectors in anything scripted.
 
 ---
 
@@ -38,8 +43,9 @@ shared vault.
 
 ```bash
 # Workspace admin (40 scopes, user OAuth)
-gam select tmbc print users
-gam select tmbc info customer
+gam print users              # bare gam = corporate
+gam info customer
+gam select personal info customer   # explicit personal
 
 # GCP
 CLOUDSDK_ACTIVE_CONFIG_NAME=tmbc gcloud projects describe tmbc-fperez-automation
@@ -100,7 +106,15 @@ single project rather than the whole org if it is ever done.
 
 ---
 
-# Personal: aionetworking.com
+# Personal: aionetworking.com (RETIRED)
+
+**This tenant was spun up to migrate off, and that migration is complete.** The stored
+OAuth token stopped refreshing after 2026-05-12 and now fails with "Reauthentication is
+needed", which is expected for a tenant that is no longer in use.
+
+The `[personal]` section in `gam.cfg` is kept only as a way back if something turns out
+to still be needed. Everything below is historical reference, not a live runbook. Do not
+assume any of it still works without re-authenticating first.
 
 ## Tooling
 
