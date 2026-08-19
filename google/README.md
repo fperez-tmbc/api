@@ -23,10 +23,18 @@ unqualified Google command in a script or a copied snippet targets production.
 Set up 2026-08-19. Workspace Business Standard, 5 licensed users. Mail does NOT route
 to Google (MX points at Exchange).
 
-**Nobody actually uses Google productivity apps here.** The mailboxes and Drive exist
-but sit unused. This tenant is identity and cloud infrastructure, primarily a B2C build.
-Practical consequence: the missing domain-wide delegation documented below costs nothing
-real, so do not relax the org key policy to obtain it without a concrete need.
+**Productivity apps are effectively unused, but the tenant is not idle.** Measured from
+the Reports API on 2026-08-15: Gmail 0 MB stored with a single email and one webmail
+user; Drive 218 MB with one active user in 30 days; Meet, Classroom, ChromeOS and Apps
+Script all zero.
+
+What is actually live is **identity and devices**: 27 authorized third-party SaaS apps
+using Google as an SSO provider, and 4 managed endpoints over 30 days across 2 users,
+one of them flagged risky.
+
+Practical consequence: the missing domain-wide delegation below costs nothing real,
+since there are no mailboxes or Drive content to reach. Do not relax the org key policy
+to obtain it without a concrete need. But do not treat this tenant as dormant either.
 
 ## Identifiers
 
