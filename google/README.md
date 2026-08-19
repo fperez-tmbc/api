@@ -36,9 +36,10 @@ Practical consequence: the missing domain-wide delegation below costs nothing re
 since there are no mailboxes or Drive content to reach. Do not relax the org key policy
 to obtain it without a concrete need. But do not treat this tenant as dormant either.
 
-**A full landscape survey is in [LANDSCAPE.md](LANDSCAPE.md)** — users, groups, OUs,
-usage measured from the Reports API, authorized apps, GCP projects, org policies, and a
-list of things that look like they need attention. Taken 2026-08-19.
+**A full landscape survey lives in the `knowledge-base` repo**, at
+`landscape/google-workspace.md`: users, groups, OUs, usage measured from the Reports API,
+authorized apps, GCP projects, org policies, and a list of things that look like they
+need attention. This repo holds credentials and commands; the survey holds findings.
 
 ## Identifiers
 
