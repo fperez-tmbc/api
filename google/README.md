@@ -39,7 +39,8 @@ to obtain it without a concrete need. But do not treat this tenant as dormant ei
 **A full landscape survey lives in the `knowledge-base` repo**, at
 `landscape/google-workspace.md`: users, groups, OUs, usage measured from the Reports API,
 authorized apps, GCP projects, org policies, and a list of things that look like they
-need attention. This repo holds credentials and commands; the survey holds findings.
+need attention. This repo holds commands and field notes, the `.tokens` directory holds
+the credential files, and the survey holds findings.
 
 ## Identifiers
 
