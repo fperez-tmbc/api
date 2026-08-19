@@ -6,16 +6,15 @@ selector and you administer the wrong company.
 
 | Tenant | Type | Selector |
 |--------|------|----------|
-| themyersbriggs.com | Corporate, Workspace Business Standard | bare `gam` (default) / `CLOUDSDK_ACTIVE_CONFIG_NAME=tmbc` |
-| aionetworking.com | Personal | `gam select personal` / bare `gcloud` (default) |
+| themyersbriggs.com | Corporate, Workspace Business Standard | **all defaults** — bare `gam`, `gcloud`, `bq`, `gsutil`, ADC |
+| aionetworking.com | Personal, RETIRED | `gam select personal` / `gcloud --configuration=default` |
 
-**GAM and gcloud default to DIFFERENT tenants.** As of 2026-08-19 `gam.cfg` has
-`section = tmbc` in `[DEFAULT]`, so a bare `gam` command hits the **corporate** tenant.
-A bare `gcloud` command still hits the **personal** account. Neither warns you.
+**Everything defaults to CORPORATE as of 2026-08-19.** `gam.cfg` has `section = tmbc`
+in `[DEFAULT]`, the active gcloud configuration is `tmbc`, and ADC carries quota project
+`tmbc-fperez-automation`. A bare command administers the company, with no warning.
 
-That asymmetry is deliberate but easy to forget: a mistyped GAM command lands on 5 real
-corporate users, while a mistyped gcloud command lands somewhere harmless. Be explicit
-with selectors in anything scripted.
+The personal tenant is retired and reachable only by naming it explicitly. Assume any
+unqualified Google command in a script or a copied snippet targets production.
 
 ---
 
@@ -47,8 +46,8 @@ gam print users              # bare gam = corporate
 gam info customer
 gam select personal info customer   # explicit personal
 
-# GCP
-CLOUDSDK_ACTIVE_CONFIG_NAME=tmbc gcloud projects describe tmbc-fperez-automation
+# GCP (bare gcloud is corporate)
+gcloud projects describe tmbc-fperez-automation
 
 # GA4 / Tag Manager / Search Console
 ~/GitHub/.venv-google/bin/python tmbc-marketing.py discover
