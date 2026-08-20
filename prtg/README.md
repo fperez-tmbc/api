@@ -174,6 +174,38 @@ PRTG does not support adding individual AD users — access is group-based:
    - Click Create
 3. Users log in with Windows credentials — PRTG creates their local account automatically on first login.
 
+## Diagnosing a stuck WMI sensor (PE015)
+
+`Connection could not be established (code: PE015)` on a WMI sensor usually means the **probe** is wedged, not the target. Confirmed 2026-08-20 on SVSCRIBEPRDDC02 (`Memory 1` 31820, `Disk Free 1` 31821): both sat Down for 8 h while three other WMI sensors on the *same device* kept returning fresh values every 60 s. Two reboots of the target changed nothing; rebooting the PRTG server cleared it instantly.
+
+Work the evidence in this order before touching anything:
+
+1. **Is it really not collecting?** An acknowledged sensor keeps displaying the ack text, so the message tells you nothing. Check `content=channels` (`lastvalue` = `No data`) and `historicdata.json` for the window. Blank channels across every scan is the real signal.
+2. **Scope it.** Pull all sensors and bucket by `status_raw`. If PE015 appears on only one or two objects while dozens of WMI sensors on the same probe are Up, credentials and the probe's WMI stack as a whole are fine.
+3. **Same-device control.** `getsensordetails.json` gives `sensortype`. `wmimemory` / `wmidiskspace` failing while `wmiprocessor` / `wmiphysicaldiskv2` on the same device succeed does **not** mean a data-source split: check `getobjectproperty.htm?name=wmiorpc`. If it returns `WMI only (default)` then every one of those sensors is on WMI, so a working neighbour proves the target's WMI is healthy.
+4. **Reproduce from the probe host as the PRTG account.** This is the step that settles it. Read the account from `getobjectproperty.htm?name=windowsloginusername` (empty means inherited from the parent group), then run the sensor's own classes over DCOM *from the probe*, not from your workstation:
+
+```powershell
+$cred = New-Object System.Management.Automation.PSCredential('CPP-DB
+tsupport',(ConvertTo-SecureString $pw -AsPlainText -Force))
+Invoke-Command -ComputerName SVMONDC02.cpp-db.com -Credential $cred -ScriptBlock {
+  param($c)
+  $s = New-CimSession -ComputerName 'target.cpp-db.com' -Credential $c -SessionOption (New-CimSessionOption -Protocol Dcom)
+  'Win32_PerfRawData_PerfOS_Memory','Win32_OperatingSystem','Win32_LogicalDisk' | ForEach-Object {
+    "{0} = {1}" -f $_, @(Get-CimInstance -CimSession $s -ClassName $_).Count }
+} -ArgumentList $cred
+```
+
+Use `-Protocol Dcom`; plain `Get-CimInstance -ComputerName` goes over WSMan and tests the wrong path. Pass the credential into the scriptblock explicitly so the remote-to-remote hop does not need delegation. Classes: `wmimemory` -> `Win32_PerfRawData_PerfOS_Memory` + `Win32_OperatingSystem`; `wmidiskspace` -> `Win32_LogicalDisk` / `Win32_Volume`; `wmiprocessor` -> `Win32_PerfRawData_PerfOS_Processor`.
+
+If step 4 returns data, the target is healthy and the fix is probe-side. Escalate: `scannow` -> pause/resume the sensor -> restart `PRTGProbeService` -> reboot the probe host.
+
+**Corroborating checks on the target** (all were clean in the 2026-08-20 case, which is what ruled the server out): no 4625 failed logons, no `Microsoft-Windows-WMI-Activity/Operational` 5858 errors whose `ClientMachine` is the probe, and one successful 4624 type-3 logon from the probe IP (DCOM keeps the session alive, so one logon covers many polls; a low count is normal, not a symptom).
+
+**SVMONDC02 is the PRTG core server, not a remote probe.** "Local Probe (SVMONDC02)" is the core's own probe. It runs `PRTGAppServer`, `PRTGCoreService`, and `PRTGProbeService`, so rebooting it takes all sensors, alerting, and the web UI down. Restarting `PRTGProbeService` alone is the contained version and fixes the same wedge. Reboot is ~1 min of downtime; sensors then trickle back over ~5 min and briefly report status `None` with `lastvalue` `-` (SNMP traffic sensors need two samples for a delta). Snapshot `table.json` before and diff after: sensor count and the paused set should both come back identical.
+
+**A recovered sensor may return as Warning, not Up.** Check the channel limits before assuming the fix failed.
+
 ## Gotchas
 
 - **Bearer header fails with 401 on action endpoints** (confirmed on `pauseobjectfor.htm`, 25.1.102.1373) even though the same token works fine as `apitoken=` on `table.json`. Use the `apitoken=` query param for actions; treat the "Bearer preferred" note above as read-only guidance.
