@@ -48,6 +48,27 @@ aws ce get-cost-and-usage --profile $P \
 - These are long-lived IAM access keys, not SSO/STS sessions — no token refresh needed, but rotate periodically.
 - Never echo the secret keys into output, scripts, or commits.
 
+## IAM policy simulator — three traps that produce wrong answers
+
+Learned granting a scoped Synthetics policy on VitaNavis, 2026-08-20.
+
+- **Simulating a resource-scoped policy without `--resource-arns` evaluates against `*`**, so a
+  perfectly good resource-scoped `Allow` reports `implicitDeny`. Always pass the ARN you mean.
+- **Some actions cannot be scoped to a resource ARN at all**, and the simulator does not say so — it
+  just returns `implicitDeny`. `synthetics:CreateCanary` is one: scoped to
+  `arn:aws:synthetics:us-west-2:…:canary:*` it is denied, while `synthetics:DeleteCanary` on the
+  *same* pattern is allowed. The fix is `Resource: "*"` plus a
+  **`aws:RequestedRegion`** condition, which contains it by region instead. Confirm the shape by
+  running the action with `Resource: "*"` and **no** `--resource-arns`: if that is `allowed` and the
+  ARN form is not, the action does not support resource-level permissions.
+- **`accessanalyzer validate-policy` does not detect this.** Control-tested: it returned **zero
+  findings** for `ec2:DescribeInstances` scoped to an instance ARN, which is definitively invalid. It
+  is not a usable signal for resource-level support. Use the simulator, and always run a known-good
+  and a known-bad case alongside the case you care about.
+
+Also: **a managed policy holds a maximum of 5 versions.** `create-policy-version` fails once full;
+delete an old non-default version first (`aws iam delete-policy-version --version-id v1`).
+
 ## Root account — what the CLI can and can't see
 
 - **`list-virtual-mfa-devices` under-reports root MFA.** It returns virtual TOTP
