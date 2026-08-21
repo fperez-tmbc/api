@@ -48,6 +48,25 @@ aws ce get-cost-and-usage --profile $P \
 - These are long-lived IAM access keys, not SSO/STS sessions — no token refresh needed, but rotate periodically.
 - Never echo the secret keys into output, scripts, or commits.
 
+## CloudWatch alarms — `notBreaching` produces false all-clears
+
+- **`TreatMissingData: notBreaching` counts a gap as compliant**, so on an N-of-N alarm a single
+  missing datapoint clears it and sends an `OK` notification. A host that goes fully silent then
+  reads `OK` indefinitely — the alarm goes quiet exactly when the host is in trouble. Seen for real:
+  a disk alarm mailed `ALARM -> OK` while the filesystem was still 92.5% full, because the host had
+  stopped reporting. Look for this reason string: *"1 datapoint was received for 2 periods and 1
+  missing datapoint was treated as [NonBreaching]."*
+- **Use `missing` instead**, even where you want a deliberately stopped host to stay quiet. It holds
+  `ALARM` through a gap, and once the window is entirely blank it falls to `INSUFFICIENT_DATA` —
+  which is silent as long as no `--insufficient-data-actions` are attached. Same silence, no lie.
+- **Testing this needs the right shape or it proves nothing.** Use the alarm's real period (a 60s
+  period looks back further for sparse custom metrics) and publish **one** breaching datapoint, so
+  the window holds one real reading and one gap. Publishing two and waiting for both to age out
+  tests "no data at all", which behaves differently: both settings sat in `ALARM` citing stale
+  datapoints and the test showed no difference at all.
+- `put-metric-alarm` **overwrites** the alarm, so re-send every field. It does not touch tags on an
+  existing alarm.
+
 ## IAM policy simulator — three traps that produce wrong answers
 
 Learned granting a scoped Synthetics policy on VitaNavis, 2026-08-20.
